@@ -1,33 +1,47 @@
 # Recruitment AI Platform
 
-Clean project workspace for rebuilding the candidate database and AI search stack.
+This repo is for building an automated recruiting intelligence system: candidate ingestion, canonical profile storage, semantic search, recruiter feedback loops, and downstream recruiter automations.
 
-This repo is intentionally separate from the legacy source workspace:
+This workspace is intentionally separate from the legacy source workspace:
 - Legacy source workspace: `/Users/spencerbarton-fisher/Mac-Mini-Projects/Recruitment-Matching`
 - New product workspace: `/Users/spencerbarton-fisher/Mac-Mini-Projects/recruitment-ai-platform`
 
-## Goals
-- Create a normalized candidate and company data model.
-- Backfill from the legacy Supabase project without mutating legacy tables.
-- Build semantic search over clean candidate profile and experience data.
-- Move the app and scripts onto a git-friendly codebase.
+## Product Goal
+Build a system that:
+- stores clean candidate and company data
+- embeds candidates and job descriptions
+- matches JDs to candidates with semantic search
+- learns from recruiter actions like strong and rejected decisions
+- supports recruiter workflows like outreach drafts, briefs, and alerts
 
-## Initial Structure
-- `app/`: future API, workers, or UI code
-- `db/migrations/`: SQL migrations for the new schema
-- `db/validation/`: validation SQL and QA checks
-- `docs/`: migration docs and schema notes
-- `scripts/`: backfill and maintenance scripts
-- `TASKS.md`: ordered implementation checklist
+## Target Stack
+- FastAPI backend
+- Supabase Postgres
+- pgvector for embeddings and similarity search
+- Celery + Redis for async jobs
+- OpenAI embeddings and lightweight generation models
 
-## Current Working Approach
-- Keep the old Supabase project as the migration source.
-- Create `v2` tables inside the same Supabase project first.
-- Backfill into `v2`.
-- Switch read paths after validation.
-- Archive legacy structures later.
+## Delivery Strategy
+1. Normalize the candidate and company data model.
+2. Backfill canonical data from the legacy system without mutating legacy tables.
+3. Build search documents and embeddings.
+4. Add job, match-state, seed, and rejection-memory tables.
+5. Implement the multi-pass matching loop.
+6. Build the recruiter UI.
+7. Add enrichment and recruiter automations.
+
+## Repo Structure
+- `AGENT.md`: implementation rules and delivery constraints
+- `TASKS.md`: phased execution checklist
+- `app/`: backend, worker, and UI code
+- `db/migrations/`: schema changes
+- `db/validation/`: QA and validation SQL
+- `docs/`: product, schema, and migration notes
+- `scripts/`: backfills and maintenance jobs
 
 ## Starting Documents
+- [AGENT.md](./AGENT.md)
 - [TASKS.md](./TASKS.md)
+- [docs/recruiting-intelligence-system.md](./docs/recruiting-intelligence-system.md)
 - [docs/legacy-data-model.md](./docs/legacy-data-model.md)
 - [docs/target-data-model.md](./docs/target-data-model.md)
