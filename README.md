@@ -78,10 +78,17 @@ If any sequencing language conflicts across docs, `TASKS.md` wins.
 - `TASKS.md`: phased execution checklist
 - `SCHEMA_CONTRACT.md`: table, relationship, and retrieval-storage contract
 - `app/`: backend, worker, and UI code
-- `db/migrations/`: schema changes
-- `db/validation/`: QA, validation, and retrieval-coverage SQL
+- `db/migrations/`: forward-only schema migrations
+- `db/validation/canonical/`: canonical row-count, orphan, duplicate, and coverage SQL
+- `db/validation/retrieval/`: retrieval row-count, orphan, duplicate, and coverage SQL
 - `docs/`: product, schema, architecture, and migration notes
-- `scripts/`: backfills, maintenance jobs, and migration helpers
+- `scripts/backfills/`: checkpoint-aware backfill and rebuild entrypoints
+- `scripts/lib/`: shared Python helpers for migration and backfill support
+- `scripts/checkpoints/`: generated JSON checkpoint state for resumable jobs
+- `reports/qa/`: generated QA outputs from migration and validation runs
+- `reports/retrieval_eval/`: generated retrieval-evaluation outputs
+
+Generated checkpoint JSON and generated report artifacts are intentionally ignored by git while the scaffold directories and their README files remain tracked.
 
 ## Starting Documents
 - [README.md](./README.md)

@@ -38,7 +38,7 @@ Done when:
 - Source-of-truth rules, foreign keys, uniqueness rules, and provenance rules are agreed.
 - `candidate_search_documents` is explicitly defined as an aggregate summary/cache rather than the only searchable vector surface.
 
-## [ ] Task 2: Create Migration, Checkpoint, And Validation Scaffolding
+## [x] Task 2: Create Migration, Checkpoint, And Validation Scaffolding
 - Create or confirm the repo structure for implementation support:
   - `db/migrations/`
   - `db/validation/canonical/`
@@ -82,10 +82,54 @@ Done when:
 - Generated checkpoint and report artifacts are ignored appropriately by git.
 - No domain table DDL or real backfill business logic has been introduced in this task.
 
-## [ ] Task 3: Create Canonical Tables And Constraints
-- Create all canonical `v2` tables.
-- Add keys, timestamps, uniqueness rules, and canonical-data indexes.
-- Keep legacy tables untouched.
+## [ ] Task 3: Create Canonical Tables, Constraints, And Canonical Validation
+- Follow `SCHEMA_CONTRACT.md` exactly for **Layer A — Canonical candidate/company data only**.
+- Create only these canonical tables:
+  - `candidate_profiles_v2`
+  - `candidate_emails_v2`
+  - `companies_v2`
+  - `candidate_experiences_v2`
+- This task is **schema DDL only** for canonical tables.
+- Do **not** create retrieval-layer tables in this task, including:
+  - `candidate_source_documents`
+  - `candidate_search_chunks`
+  - `candidate_chunk_embeddings`
+  - `candidate_search_documents`
+- Do **not** create job or match-state tables in this task.
+- Add required canonical-table extensions and shared helpers needed by the schema contract, including:
+  - `citext` if used by canonical email columns
+  - UUID/default-generation support if used by new canonical rows
+  - any shared `updated_at` trigger/helper if timestamps are DB-managed
+- Create the canonical tables with the exact columns, nullability, PKs, FKs, on-delete behavior, partial unique constraints, and indexes defined in `SCHEMA_CONTRACT.md`.
+- Preserve canonical/retrieval boundaries:
+  - canonical tables must remain valid without retrieval artifacts
+  - `current_*` profile fields and `experience_years` remain derived/cache fields
+  - work-history truth remains in `candidate_experiences_v2`
+- Keep legacy tables untouched:
+  - no mutation
+  - no deletion
+  - no renames
+  - no data copy/backfill yet
+- Add canonical schema validation SQL under `db/validation/canonical/` for:
+  - table existence
+  - PK/FK existence
+  - required unique and partial-unique constraints
+  - required non-vector indexes
+- Add a canonical schema smoke test or validation script that proves:
+  - a minimal `candidate_profiles_v2` insert works without any retrieval rows
+  - `candidate_emails_v2` uniqueness and one-primary-email rules behave correctly
+  - `companies_v2` allows name-fallback rows without enforcing uniqueness on normalized name alone
+  - `candidate_experiences_v2` can insert valid experience rows linked to a candidate even when `company_id` is null
+- If any canonical DDL detail is ambiguous or missing in `SCHEMA_CONTRACT.md`, stop and update the contract instead of inventing schema behavior.
+
+Done when:
+- The four canonical Layer A tables exist and compile successfully.
+- Canonical DDL matches `SCHEMA_CONTRACT.md` without introducing retrieval or job tables.
+- Required canonical extensions/helpers are present.
+- PKs, FKs, delete behaviors, unique rules, partial unique constraints, and canonical indexes exist as specified.
+- Canonical validation SQL exists under `db/validation/canonical/`.
+- Smoke inserts prove the canonical tables work independently of retrieval artifacts.
+- No retrieval tables, vector columns, pgvector indexes, backfill logic, or legacy-table mutations were introduced in this task.
 
 Done when:
 - The tables compile successfully.

@@ -1,0 +1,5 @@
+-- Placeholder scaffold for canonical orphan checks.
+-- Purpose:
+--   Verify foreign-key-like relationships remain intact after canonical backfills.
+--
+-- Fill this file with concrete SELECT statements after canonical tables exist.

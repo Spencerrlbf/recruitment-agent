@@ -1,0 +1,5 @@
+-- Placeholder scaffold for retrieval orphan checks.
+-- Purpose:
+--   Detect retrieval records that no longer resolve to their expected parent entities.
+--
+-- Fill this file with concrete SELECT statements after retrieval tables exist.

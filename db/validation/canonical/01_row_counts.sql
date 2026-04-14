@@ -1,0 +1,5 @@
+-- Placeholder scaffold for canonical row-count validation.
+-- Purpose:
+--   Compare legacy counts, canonical counts, and expected reconciliation totals.
+--
+-- Fill this file with concrete SELECT statements after canonical tables exist.

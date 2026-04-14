@@ -19,3 +19,11 @@ tmp/
 *.log
 db_snapshot/
 supabase/
+
+# Task 2 generated artifacts
+scripts/checkpoints/*
+!scripts/checkpoints/README.md
+reports/qa/*
+!reports/qa/README.md
+reports/retrieval_eval/*
+!reports/retrieval_eval/README.md

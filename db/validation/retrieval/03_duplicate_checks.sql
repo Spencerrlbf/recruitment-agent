@@ -1,0 +1,5 @@
+-- Placeholder scaffold for retrieval duplicate checks.
+-- Purpose:
+--   Detect duplicate documents, chunks, or embeddings that violate retrieval uniqueness rules.
+--
+-- Fill this file with concrete SELECT statements after retrieval tables exist.
