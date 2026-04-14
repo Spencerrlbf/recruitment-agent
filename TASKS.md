@@ -39,13 +39,48 @@ Done when:
 - `candidate_search_documents` is explicitly defined as an aggregate summary/cache rather than the only searchable vector surface.
 
 ## [ ] Task 2: Create Migration, Checkpoint, And Validation Scaffolding
-- Add migration, backfill, checkpoint, and validation structure.
-- Define how long-running backfills resume safely.
-- Define where QA reports and retrieval-evaluation reports live.
+- Create or confirm the repo structure for implementation support:
+  - `db/migrations/`
+  - `db/validation/canonical/`
+  - `db/validation/retrieval/`
+  - `scripts/backfills/`
+  - `scripts/lib/`
+  - `scripts/checkpoints/`
+  - `reports/qa/`
+  - `reports/retrieval_eval/`
+- Add lightweight README files or equivalent docs explaining what belongs in each location and the naming conventions for:
+  - migration files
+  - validation files
+  - backfill scripts
+  - checkpoint files
+  - QA and retrieval-evaluation report artifacts
+- Implement a shared file-based JSON checkpoint helper under `scripts/lib/` for long-running backfills and rebuilds.
+- Store generated checkpoint files under `scripts/checkpoints/` using atomic writes and resumable progress fields.
+- Add a reusable backfill script template that demonstrates:
+  - dry-run mode
+  - batch iteration
+  - checkpoint load/save
+  - resumable execution
+  - idempotent rerun structure
+- Add placeholder validation scaffolding for:
+  - row-count checks
+  - orphan checks
+  - duplicate checks
+  - coverage checks for source documents, chunks, and embeddings
+- Add `.gitignore` rules for generated checkpoint files and generated report artifacts while preserving the directory structure in git.
+- Keep this task scaffolding-only:
+  - do not create canonical tables yet
+  - do not create retrieval tables yet
+  - do not create job tables yet
+  - do not implement domain backfill logic yet
 
 Done when:
-- The repo has a clear place for SQL, scripts, checkpoints, validation queries, and retrieval QA artifacts.
-- A backfill can resume without starting over.
+- The repo has a documented place for migrations, validation SQL, backfill scripts, shared helpers, checkpoint files, QA reports, and retrieval-evaluation artifacts.
+- A shared checkpoint helper exists and supports safe resumable file-based JSON checkpoints.
+- A reusable backfill template exists and demonstrates dry-run, batching, checkpoint resume, and idempotent structure.
+- Placeholder validation scaffolding exists for canonical and retrieval QA work.
+- Generated checkpoint and report artifacts are ignored appropriately by git.
+- No domain table DDL or real backfill business logic has been introduced in this task.
 
 ## [ ] Task 3: Create Canonical Tables And Constraints
 - Create all canonical `v2` tables.
