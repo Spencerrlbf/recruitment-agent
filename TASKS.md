@@ -10,59 +10,82 @@ Rules for this project:
 - Generate embeddings automatically on the relevant insert or upload event.
 - Persist recruiter feedback so ranking decisions can improve over time.
 - Validate each phase before moving to the next one.
+- Treat LinkedIn data as the baseline searchable source for every candidate.
+- Treat resumes as higher-signal search evidence when present, but do not penalize candidates who only have LinkedIn data.
+- Treat recruiter notes and transcript-derived signals as supplemental evidence; raw notes are lower-trust than approved structured summaries.
+- Keep `candidate_search_documents` as an aggregate candidate summary/cache, not the only retrieval surface.
+- Preserve the JD signal in ranking at all times, even when reference-candidate similarity becomes strong.
+- Route candidates with unknown hard-filter values into a needs-screening bucket instead of excluding them by default.
 
-## Phase 1: Canonical Candidate Data
+## Phase 1: Canonical Candidate Data And Retrieval Foundation
 
-## [ ] Task 1: Lock The Canonical Data Model
-- Finalize the exact `v2` tables:
+## [x] Task 1: Lock The Canonical And Retrieval Data Model
+- Finalize the exact `v2` canonical tables:
   - `candidate_profiles_v2`
   - `candidate_emails_v2`
   - `companies_v2`
   - `candidate_experiences_v2`
+- Finalize the retrieval-layer tables and boundaries:
+  - `candidate_source_documents`
+  - `candidate_search_chunks`
+  - `candidate_chunk_embeddings`
   - `candidate_search_documents`
-- Map legacy fields into the new model.
-- Decide which fields stay canonical versus derived or cached.
+- Document which fields are canonical, derived/cache, retrieval-only, or explicitly out of scope.
+- Document how LinkedIn, resumes, recruiter notes, transcript summaries, and future candidate artifacts flow into the retrieval layer.
 
 Done when:
 - The schema contract is documented.
-- Unique constraints, foreign keys, and source-of-truth rules are agreed.
+- Source-of-truth rules, foreign keys, uniqueness rules, and provenance rules are agreed.
+- `candidate_search_documents` is explicitly defined as an aggregate summary/cache rather than the only searchable vector surface.
 
-## [ ] Task 2: Create Migration And Validation Scaffolding
+## [ ] Task 2: Create Migration, Checkpoint, And Validation Scaffolding
 - Add migration, backfill, checkpoint, and validation structure.
 - Define how long-running backfills resume safely.
-- Define where QA reports live.
+- Define where QA reports and retrieval-evaluation reports live.
 
 Done when:
-- The repo has a clear place for SQL, scripts, checkpoints, and validation queries.
+- The repo has a clear place for SQL, scripts, checkpoints, validation queries, and retrieval QA artifacts.
 - A backfill can resume without starting over.
 
 ## [ ] Task 3: Create Canonical Tables And Constraints
-- Create all `v2` tables.
-- Add keys, timestamps, uniqueness rules, and retrieval-oriented indexes.
+- Create all canonical `v2` tables.
+- Add keys, timestamps, uniqueness rules, and canonical-data indexes.
 - Keep legacy tables untouched.
 
 Done when:
 - The tables compile successfully.
 - Test inserts work.
+- Canonical tables do not depend on retrieval artifacts to remain valid.
 
-## [ ] Task 4: Implement Canonicalization Rules
+## [ ] Task 4: Create Retrieval Corpus Tables And Constraints
+- Create candidate retrieval tables for source documents, chunks, embeddings, and aggregate search documents.
+- Add foreign keys, document/version identifiers, source-type metadata, and chunk-order metadata.
+- Add vector indexes and supporting retrieval indexes only where dimensions and model/version are compatible.
+
+Done when:
+- The retrieval corpus can store multiple documents and multiple embeddings per candidate.
+- A candidate can have LinkedIn-only evidence, LinkedIn plus resume evidence, and recruiter-note evidence without schema changes.
+
+## [ ] Task 5: Implement Canonicalization Rules
 - Normalize emails.
 - Resolve canonical companies by strong identity first and name fallback last.
-- Normalize experience dates, current-role flags, and raw company names.
+- Normalize experience dates, current-role flags, raw company names, and LinkedIn identity fields.
 
 Done when:
 - Canonicalization behavior is deterministic.
 - Helpers exist in reusable SQL or application code.
+- Canonicalization is independent from chunking and embedding generation.
 
-## [ ] Task 5: Backfill Companies
+## [ ] Task 6: Backfill Companies
 - Seed `companies_v2` from the existing company data.
-- Deduplicate against the canonical identity rules.
+- Deduplicate against canonical identity rules.
 - Preserve traceability and source-quality markers.
 
 Done when:
 - Canonical companies exist with measurable duplicate reduction.
+- Company resolution precedence is reproducible.
 
-## [ ] Task 6: Backfill Candidate Profiles And Emails
+## [ ] Task 7: Backfill Candidate Profiles And Emails
 - Copy one stable profile row per candidate.
 - Backfill normalized candidate emails.
 - Preserve source references and verification metadata.
@@ -71,7 +94,7 @@ Done when:
 - Candidate counts reconcile.
 - Candidate-email duplicates are prevented.
 
-## [ ] Task 7: Backfill Candidate Experiences
+## [ ] Task 8: Backfill Candidate Experiences
 - Parse work history from legacy experience sources.
 - Resolve each experience to a canonical company.
 - Store one row per experience item with raw payload traceability.
@@ -80,178 +103,305 @@ Done when:
 - Experience rows link to valid candidates and companies.
 - Current role state comes from experience rows, not legacy text fields.
 
-## [ ] Task 8: Build Search Documents
-- Create one search document per candidate from normalized profile, experience, education, and skills data.
-- Keep structured filter fields beside the flattened text.
+## [ ] Task 9: Backfill Candidate Source Documents
+- Create retrieval-source rows for every candidate from available LinkedIn data.
+- Import resume text and metadata when present.
+- Store recruiter notes, transcript summaries, and future candidate artifacts as separate source documents with provenance and trust metadata.
+- Preserve document versions and timestamps so newer evidence can be tracked without losing history.
 
 Done when:
-- Search documents are generated from canonical tables instead of legacy blobs.
+- Every candidate has at least one retrieval source document from LinkedIn data.
+- Candidates with resumes and notes have additional searchable source documents instead of merged opaque blobs.
 
-## [ ] Task 9: Add Candidate Embeddings And Retrieval Indexes
-- Add vector storage and similarity indexes.
-- Generate candidate embeddings automatically.
-- Support structured filters alongside semantic retrieval.
+## [ ] Task 10: Build Candidate Search Chunks
+- Chunk candidate source documents by semantic section rather than only fixed windows where possible.
+- Create chunking rules by source type:
+  - LinkedIn: headline/about, current role, experience items, skills blocks
+  - Resume: summary, role/project sections, skills blocks, certifications/education where useful
+  - Recruiter notes and transcript summaries: raw-note chunks plus cleaned-summary chunks when available
+- Record chunk source type, source priority, chunk order, document version, and confidence/trust metadata.
 
 Done when:
-- Candidate retrieval runs from the canonical model with vectors stored in the database.
+- A candidate can produce multiple searchable chunks from LinkedIn, resume, and recruiter evidence.
+- Chunk boundaries are reproducible and explainable.
 
-## [ ] Task 10: Add Validation And QA Checks
+## [ ] Task 11: Add Candidate Chunk Embeddings And Retrieval Indexes
+- Generate embeddings for candidate search chunks.
+- Store model/version metadata and rebuild status.
+- Add ANN or exact-search indexes appropriate for the chosen model and scale.
+- Support structured filters alongside vector retrieval.
+
+Done when:
+- Candidate retrieval runs against chunk embeddings rather than only one candidate-level vector.
+- The system can explain which chunk caused a match.
+
+## [ ] Task 12: Build Aggregate Candidate Search Documents
+- Build one aggregate candidate summary row in `candidate_search_documents` from canonical data and selected retrieval artifacts.
+- Keep structured filter fields beside the flattened summary text.
+- Do not treat this table as the only search surface.
+
+Done when:
+- Aggregate candidate summaries exist for debugging, coarse retrieval, and admin views.
+- The retrieval loop still depends on chunk-level evidence.
+
+## [ ] Task 13: Add Validation And QA Checks
 - Add row-count, orphan, duplicate, and spot-check queries.
-- Produce a migration QA report.
+- Validate source-document coverage, chunk coverage, and embedding coverage.
+- Produce migration QA reports and retrieval-corpus QA reports.
 
 Done when:
-- The canonical data layer is structurally trustworthy.
+- The canonical and retrieval layers are structurally trustworthy.
+- Coverage gaps are measurable.
 
-## Phase 2: Job Matching Core
+## [ ] Task 14: Add Initial Retrieval Evaluation Harness
+- Build an offline evaluation harness for candidate retrieval before job matching is fully built.
+- Create a small gold set of representative jobs and known-good candidates.
+- Compare candidate-level retrieval and chunk-level retrieval for recall and precision.
 
-## [ ] Task 11: Create Job And Match-State Tables
+Done when:
+- Retrieval quality can be measured before the UI depends on it.
+- The project has an evidence-based baseline for future tuning.
+
+## Phase 2: Job Intake And Matching Core
+
+## [ ] Task 15: Create Job, Reference-Candidate, And Match-State Tables
 - Create:
   - `jobs`
+  - `job_source_documents`
+  - `job_search_chunks`
+  - `job_chunk_embeddings`
+  - `job_reference_candidates`
   - `job_candidates`
-  - `seeds`
-  - `rejected_embeddings`
-- Define status values and relationship rules.
+  - `job_rejection_memory`
+- Define status values, provenance fields, and relationship rules.
 
 Done when:
-- The database can persist JD uploads, candidate pools, seeds, and rejection memory.
+- The database can persist JD uploads, hard-filter settings, attached reference candidates, surfaced candidate pools, and rejection memory.
 
-## [ ] Task 12: Implement JD Upload And Embedding Generation
+## [ ] Task 16: Implement Job Creation, JD Storage, And Hard-Filter Config
 - Store raw JD text and normalized fields.
-- Generate the JD embedding immediately on upload.
-- Mark jobs ready for retrieval.
+- Persist recruiter-selected hard filters and optional preferred filters separately.
+- Keep unknown candidate values out of automatic exclusion unless the user explicitly chooses otherwise.
 
 Done when:
-- Every searchable job has a stored embedding.
+- A new job stores both its source document and its filter contract.
+- The system can distinguish between fail, pass, and needs-screening outcomes.
 
-## [ ] Task 13: Implement Pass 1 JD Semantic Sweep
-- Search candidate embeddings by JD similarity.
-- Add a configurable similarity threshold.
-- Pull the top candidate set for the first pass.
+## [ ] Task 17: Implement Reference-Candidate Attachment And Import
+- Allow one or more ideal/reference candidates to be attached during job creation.
+- Accept LinkedIn URLs from the recruiter or hiring manager.
+- Check whether the candidate already exists in the database.
+- If not, fetch LinkedIn data via the approved ingestion path, create the canonical candidate record, and backfill retrieval artifacts.
+- Support optional archetype labels so a job can keep multiple acceptable candidate shapes.
 
 Done when:
-- A job can return an initial candidate pool ranked by JD similarity.
+- A job can attach existing or newly imported reference candidates.
+- Reference candidates become permanent candidate records in the main candidate database.
 
-## [ ] Task 14: Implement The Keyword Funnel
+## [ ] Task 18: Implement JD Chunking And Embeddings
+- Chunk the JD into meaningful sections such as summary, responsibilities, required skills, preferred skills, and domain context.
+- Generate JD chunk embeddings and store model/version metadata.
+- Keep the raw JD and normalized fields linked to the chunk set that was used.
+
+Done when:
+- A job has multiple searchable JD chunks instead of only one monolithic embedding.
+- JD chunk generation is reproducible and versioned.
+
+## [ ] Task 19: Implement Reference-Candidate Snapshotting And Retrieval Artifacts
+- Freeze a job-scoped snapshot of each reference candidate when attached to the job.
+- Build reference-candidate text/chunks/embeddings from that snapshot.
+- Preserve the link to the permanent `candidate_id` while keeping the job-time snapshot stable for reproducibility.
+
+Done when:
+- Every job reference candidate has stable, job-scoped retrieval artifacts.
+- Future candidate-profile refreshes do not silently change historical job runs.
+
+## [ ] Task 20: Implement Pass 1 JD Retrieval
+- Search candidate chunk embeddings by JD similarity.
+- Add configurable thresholds and top-K controls.
+- Collapse chunk hits back to candidate-level results with evidence references.
+
+Done when:
+- A job can return an initial candidate pool ranked by JD similarity with chunk-level evidence.
+
+## [ ] Task 21: Implement Exact-Match And Keyword Funnel
 - Support strict and progressively broader keyword levels.
+- Include exact technical matching for high-signal stack terms where semantic similarity alone is too loose.
 - Expand the funnel only when the result set is too thin.
-- Persist the level each candidate passed.
+- Persist the level each candidate passed and the evidence that satisfied it.
 
 Done when:
-- Candidate results carry a keyword-level badge and the funnel logic is reproducible.
+- Candidate results carry a reproducible keyword-level badge.
+- Technical exact-match requirements can reinforce weak LinkedIn profiles without replacing semantic retrieval.
 
-## [ ] Task 15: Implement Recruiter Feedback Capture
-- Support `strong`, `rejected`, and `skipped` actions.
+## [ ] Task 22: Implement Reference-Candidate Similarity Retrieval
+- Run one retrieval pass for each attached reference candidate.
+- Keep the passes separate so multiple archetypes do not collapse into a muddy average too early.
+- Persist which reference candidate and which evidence produced each match.
+
+Done when:
+- A job can surface candidates based on similarity to one or more attached reference candidates.
+- The system can explain which reference candidate drove each result.
+
+## [ ] Task 23: Implement Recruiter Feedback Capture And Durable Job Memory
+- Support `strong`, `rejected`, `skipped`, and `needs_screening` actions.
 - Persist rejection memory for the job.
-- Persist seeds when a candidate is marked strong.
+- Allow a recruiter to promote a surfaced strong candidate into `job_reference_candidates` when that improves the search.
+- Preserve action provenance and timestamps.
 
 Done when:
 - Recruiter actions are durable and can influence later ranking.
+- Strong candidates can become additional job reference candidates without losing the original attached examples.
 
-## [ ] Task 16: Implement Pass 3 Seed-Based Candidate Search
-- Search the full pool using seed-candidate similarity.
-- Apply the keyword funnel and rejection filter again.
-- Merge and deduplicate against the existing pool.
-
-Done when:
-- A confirmed strong candidate can expand the pool with seed-similar candidates.
-
-## [ ] Task 17: Implement Ensemble Re-Ranking
-- Calculate JD similarity, seed similarity, and composite score.
-- Shift weighting dynamically based on seed count.
+## [ ] Task 24: Implement Ensemble Re-Ranking And Evidence Persistence
+- Calculate JD similarity, reference-candidate similarity, exact-match/keyword evidence, and source-aware evidence weights.
+- Weight candidate evidence by source type:
+  - LinkedIn as baseline
+  - resume chunks stronger when present
+  - raw recruiter-note chunks lighter than approved structured summaries
 - Keep JD influence non-zero.
+- Persist the evidence rows needed to explain the final score.
 
 Done when:
 - Ranking is explainable and follows the weighting rules.
+- Resume-rich candidates can benefit from stronger evidence without suppressing LinkedIn-only candidates unfairly.
 
-## [ ] Task 18: Implement Iteration Limits And Stop Conditions
+## [ ] Task 25: Implement Iteration Limits, Stop Conditions, And Needs-Screening Buckets
 - Cap iteration count.
 - Stop when no new candidates clear the threshold.
+- Route candidates with unknown hard-filter values into a needs-screening bucket.
 - Preserve iteration history for debugging.
 
 Done when:
 - The matching loop is bounded and auditable.
+- Unknown values no longer behave like silent exclusions.
+
+## [ ] Task 26: Add Real-Job Retrieval Evaluation And Tuning Controls
+- Measure retrieval quality on real job runs using recruiter-reviewed outcomes.
+- Compare JD-only retrieval, JD plus reference-candidate retrieval, and different source-weighting strategies.
+- Track tuning changes and evaluation results over time.
+
+Done when:
+- Matching improvements are measured rather than guessed.
+- The team can tune retrieval policies with evidence.
 
 ## Phase 3: Backend Application Layer
 
-## [ ] Task 19: Build FastAPI Match Endpoints
-- Add endpoints for JD creation, run kickoff, result retrieval, and recruiter actions.
-- Expose scores, badges, and candidate state cleanly.
+## [ ] Task 27: Build FastAPI Match And Ingestion Endpoints
+- Add endpoints for job creation, JD upload, reference-candidate attachment, run kickoff, result retrieval, recruiter actions, and candidate-evidence views.
+- Expose scores, badges, evidence references, screening state, and candidate state cleanly.
 
 Done when:
 - The UI can run the system without direct database access.
+- The API returns enough information to explain why candidates ranked.
 
-## [ ] Task 20: Build Celery Workflows
-- Trigger candidate embedding generation on insert.
-- Trigger JD embedding generation on upload.
-- Trigger seed expansion after recruiter confirmation.
+## [ ] Task 28: Build Celery Workflows For Ingestion, Chunking, Embeddings, And Reruns
+- Trigger candidate retrieval-artifact generation on insert or document upload.
+- Trigger JD chunking and embedding generation on upload.
+- Trigger reference-candidate import/snapshotting when attached to a job.
+- Trigger reruns or incremental expansion after recruiter confirmation where appropriate.
 
 Done when:
 - Async workflows are automatic and idempotent.
+- Adding resumes, notes, or new reference candidates updates retrieval artifacts safely.
 
-## [ ] Task 21: Add Observability For Matching Jobs
-- Log retrieval, ranking, and worker outcomes.
-- Track job status transitions and failures.
+## [ ] Task 29: Add Observability For Matching Jobs And Retrieval Pipelines
+- Log ingestion, chunking, embedding, retrieval, reranking, and worker outcomes.
+- Track job status transitions, failures, coverage gaps, and index rebuilds.
+- Record which retrieval strategy version was used for each run.
 
 Done when:
 - Matching runs can be monitored and debugged without database forensics.
+- Retrieval regressions are discoverable.
 
 ## Phase 4: Recruiter UI
 
-## [ ] Task 22: Build The Three-Panel Recruiter Layout
-- Left panel for JD review and run controls.
+## [ ] Task 30: Build The Three-Panel Recruiter Layout
+- Left panel for job review, hard-filter settings, and run controls.
 - Center feed for ranked candidates.
-- Right panel for candidate details.
+- Right panel for candidate details, source evidence, and recruiter notes.
 
 Done when:
 - A recruiter can run and review a job from a single screen.
 
-## [ ] Task 23: Build Candidate Cards And Actions
-- Show name, title, score indicators, and keyword badge.
-- Support strong, reject, and skip directly from the feed.
+## [ ] Task 31: Build Candidate Cards, Evidence Views, And Actions
+- Show name, title, score indicators, keyword badge, and screening state.
+- Show why a candidate surfaced, including matched chunks and matched reference candidates.
+- Support strong, reject, skip, and needs-screening directly from the feed.
 
 Done when:
-- Recruiter actions update the backend state immediately and clearly.
+- Recruiter actions update backend state immediately and clearly.
+- Recruiters can see the evidence behind each surfaced candidate.
 
-## [ ] Task 24: Add Threshold And Funnel Controls
+## [ ] Task 32: Add Hard-Filter, Threshold, Funnel, And Reference-Candidate Controls
 - Add semantic-threshold controls.
-- Show the active keyword level.
+- Show the active keyword level and exact-match rules.
 - Allow the recruiter to widen the funnel deliberately.
+- Allow recruiters to manage attached reference candidates and archetype labels from the job view.
 
 Done when:
 - Search breadth can be tuned from the UI.
+- Reference-candidate management does not require direct database work.
 
-## Phase 5: Recruiter Automations
+## [ ] Task 33: Add Needs-Screening And Match-Explanation Views
+- Separate clear matches from needs-screening candidates.
+- Show which missing or unknown fields triggered screening.
+- Show score composition and source-evidence weighting in an understandable way.
 
-## [ ] Task 25: Add Candidate Enrichment
+Done when:
+- Recruiters can act differently on clear matches and incomplete-but-promising candidates.
+- The UI explains match quality without hiding uncertainty.
+
+## Phase 5: Recruiter Intelligence And Automations
+
+## [ ] Task 34: Add Candidate Enrichment
 - Enrich candidate and company records on insert.
 - Store enrichment provenance and freshness metadata.
+- Feed approved enrichment into the retrieval corpus where it materially improves search quality.
 
 Done when:
 - Recruiters see usable enrichment data on surfaced candidates.
+- Enrichment improves retrieval without silently replacing canonical source data.
 
-## [ ] Task 26: Add Outreach Draft Generation
-- Generate first-touch outreach drafts from candidate plus JD context.
+## [ ] Task 35: Add A Structured Recruiter Assessment Framework
+- Create a standard cross-role recruiter checklist.
+- Add a job-specific checklist extension generated from the JD and attached reference candidates.
+- Store job-scoped answers separately from reusable candidate-level signals.
+- Represent answers with strength, recency, confidence, and unknown states rather than only yes/no where possible.
+
+Done when:
+- Recruiters can capture structured candidate-fit evidence during a search.
+- The system can reuse durable facts later without overwriting canonical profile fields blindly.
+
+## [ ] Task 36: Add Recruiter Notes, Transcript Processing, And Approved Signal Promotion
+- Store raw recruiter notes as source documents immediately.
+- Convert raw notes and transcripts into structured summaries asynchronously.
+- Let raw notes influence retrieval lightly.
+- Promote approved structured summaries into stronger search signals and reusable recruiter-signal records.
+
+Done when:
+- Fresh recruiter insight can help discovery quickly.
+- Approved summaries become higher-trust ranking signals than raw notes.
+
+## [ ] Task 37: Add Outreach Draft Generation
+- Generate first-touch outreach drafts from candidate plus job context.
+- Use match evidence and recruiter signals to personalize drafts.
 - Support optional follow-up scheduling with a stop-on-response rule.
 
 Done when:
 - Recruiters can review high-quality outreach drafts instead of writing from scratch.
 
-## [ ] Task 27: Add Candidate Brief Generation
-- Produce a client-ready brief from the stored candidate profile and match context.
+## [ ] Task 38: Add Candidate Brief Generation
+- Produce a client-ready brief from the stored candidate profile, retrieval evidence, and match context.
+- Make sure the brief distinguishes between confirmed facts, inferred fit, and recruiter observations.
 
 Done when:
 - The system can generate a reusable external-facing candidate summary.
+- The generated brief remains faithful to stored evidence.
 
-## [ ] Task 28: Add Transcript Processing And Record Updates
-- Turn call or interview transcripts into structured notes.
-- Write approved summaries back to the candidate record.
-
-Done when:
-- Candidate records can be updated from recruiter conversations without manual re-entry.
-
-## [ ] Task 29: Add Alerts, Hygiene, And Digest Jobs
+## [ ] Task 39: Add Alerts, Hygiene, And Digest Jobs
 - Track job changes for relevant candidates.
-- Detect stale pipelines and duplicate candidates.
+- Detect stale pipelines, duplicate candidates, and outdated retrieval artifacts.
 - Generate weekly recruiter digests.
 
 Done when:
@@ -259,25 +409,28 @@ Done when:
 
 ## Phase 6: Hardening And Rollout
 
-## [ ] Task 30: Add Evaluation, Cost, And Quality Controls
-- Build offline evaluation datasets for retrieval quality.
+## [ ] Task 40: Add Cost, Quality, And Prompt-Version Controls
 - Track embedding, model, and worker costs.
-- Add prompt/version controls for generated outputs.
+- Track retrieval quality, ranking quality, and structured-note quality.
+- Add prompt/version controls for generated outputs and note-structuring workflows.
 
 Done when:
 - Quality and spend can be measured rather than guessed.
+- The team can tie retrieval outcomes back to model and prompt versions.
 
-## [ ] Task 31: Switch Read Paths To The Canonical Model
-- Move app and scripts onto the new tables.
+## [ ] Task 41: Switch Read Paths To The Canonical And Retrieval Model
+- Move app and scripts onto the new canonical and retrieval tables.
 - Compare old and new outputs for representative recruiting flows.
+- Ensure all production retrieval paths use chunk-level evidence and the new ranking stack.
 
 Done when:
 - Normal reads no longer depend on legacy candidate and company structure.
+- Production matching uses the new retrieval model.
 
-## [ ] Task 32: Freeze Or Archive Legacy Structures
+## [ ] Task 42: Freeze Or Archive Legacy Structures
 - Mark old tables as deprecated.
 - Remove or freeze remaining legacy-targeted writes.
-- Keep a rollback plan.
+- Keep a rollback plan and migration audit trail.
 
 Done when:
 - The system operates on the canonical recruiting model with a safe fallback story.
