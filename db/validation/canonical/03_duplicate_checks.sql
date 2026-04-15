@@ -1,5 +1,0 @@
--- Placeholder scaffold for canonical duplicate checks.
--- Purpose:
---   Detect duplicate entities that violate canonical uniqueness expectations.
---
--- Fill this file with concrete SELECT statements after canonical tables exist.

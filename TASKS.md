@@ -136,10 +136,67 @@ Done when:
 - Test inserts work.
 - Canonical tables do not depend on retrieval artifacts to remain valid.
 
-## [ ] Task 4: Create Retrieval Corpus Tables And Constraints
-- Create candidate retrieval tables for source documents, chunks, embeddings, and aggregate search documents.
-- Add foreign keys, document/version identifiers, source-type metadata, and chunk-order metadata.
-- Add vector indexes and supporting retrieval indexes only where dimensions and model/version are compatible.
+## [ ] Task 4: Create Candidate Retrieval Corpus Tables, Constraints, And Retrieval Validation
+- Follow `SCHEMA_CONTRACT.md` exactly for **Layer B — Candidate retrieval corpus only**.
+- Create only these candidate retrieval tables:
+  - `candidate_source_documents`
+  - `candidate_search_chunks`
+  - `candidate_chunk_embeddings`
+  - `candidate_search_documents`
+- This task is **schema DDL only** for candidate retrieval storage.
+- Do **not** create job-side retrieval or match-state tables in this task, including:
+  - `jobs`
+  - `job_source_documents`
+  - `job_search_chunks`
+  - `job_chunk_embeddings`
+  - `job_reference_candidates`
+  - `job_candidates`
+  - `job_rejection_memory`
+- Do **not** implement candidate source-document backfill, chunking logic, embedding-generation jobs, or aggregate search-document rebuild jobs in this task.
+- Do **not** add recruiter-assessment tables in this task.
+- Confirm required vector support exists before creating embedding columns and ANN indexes:
+  - ensure `pgvector` support is available for `candidate_chunk_embeddings.embedding`
+  - if vector-extension setup is needed and was not already added in Task 3, add only the minimum required extension setup for this task
+- Create the retrieval corpus tables with the exact columns, nullability, PKs, FKs, on-delete behavior, versioning fields, trust/source metadata, and indexes defined in `SCHEMA_CONTRACT.md`.
+- Preserve canonical/retrieval boundaries:
+  - retrieval tables depend on canonical candidate tables from Task 3
+  - embeddings live only in `candidate_chunk_embeddings`
+  - do **not** add embeddings to canonical tables
+  - do **not** add an embedding column to `candidate_search_documents`
+  - keep `candidate_search_documents` as an aggregate summary/cache, not the primary retrieval surface
+- Add retrieval-support indexes exactly where the schema contract calls for them:
+  - FK/supporting indexes on source documents, chunks, and embeddings
+  - ANN index only for the active retrieval model/dimension combination
+  - do **not** create mixed-dimension ANN indexes or guess additional vector-index strategies not documented in the contract
+- Keep legacy tables untouched:
+  - no mutation
+  - no deletion
+  - no renames
+  - no data copy/backfill yet
+- Add retrieval schema validation SQL under `db/validation/retrieval/` for:
+  - table existence
+  - PK/FK existence
+  - required uniqueness constraints
+  - required non-vector indexes
+  - required vector-index presence only where the active model/dimension combination supports it
+- Add a retrieval schema smoke test or validation script that proves:
+  - one candidate can have multiple `candidate_source_documents`
+  - one source document can have multiple `candidate_search_chunks`
+  - one candidate can have multiple chunk embeddings
+  - a candidate can support LinkedIn-only evidence without requiring resume or note rows
+  - a candidate can later support LinkedIn + resume + recruiter-note evidence without schema changes
+  - `candidate_search_documents` can exist as a one-row-per-candidate aggregate cache without acting as the only embedding surface
+- If any retrieval-table detail is ambiguous or missing in `SCHEMA_CONTRACT.md`, stop and update the contract instead of inventing schema behavior.
+
+Done when:
+- The four Layer B candidate retrieval tables exist and compile successfully.
+- Retrieval DDL matches `SCHEMA_CONTRACT.md` without introducing job-side retrieval, match-state, or recruiter-assessment tables.
+- Required vector support exists for `candidate_chunk_embeddings`.
+- PKs, FKs, delete behaviors, versioning fields, uniqueness rules, trust/source metadata, and retrieval-support indexes exist as specified.
+- `candidate_search_documents` is implemented as an aggregate summary/cache and does not carry the primary retrieval embedding surface.
+- Retrieval validation SQL exists under `db/validation/retrieval/`.
+- Smoke inserts prove the schema supports multiple documents, multiple chunks, and multiple embeddings per candidate.
+- No backfill logic, chunking logic, embedding-generation jobs, job tables, or legacy-table mutations were introduced in this task.
 
 Done when:
 - The retrieval corpus can store multiple documents and multiple embeddings per candidate.

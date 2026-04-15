@@ -1,5 +1,0 @@
--- Placeholder scaffold for canonical coverage checks.
--- Purpose:
---   Measure required-field coverage and backfill completeness for canonical entities.
---
--- Fill this file with concrete SELECT statements after canonical tables exist.
