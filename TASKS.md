@@ -82,7 +82,7 @@ Done when:
 - Generated checkpoint and report artifacts are ignored appropriately by git.
 - No domain table DDL or real backfill business logic has been introduced in this task.
 
-## [ ] Task 3: Create Canonical Tables, Constraints, And Canonical Validation
+## [x] Task 3: Create Canonical Tables, Constraints, And Canonical Validation
 - Follow `SCHEMA_CONTRACT.md` exactly for **Layer A — Canonical candidate/company data only**.
 - Create only these canonical tables:
   - `candidate_profiles_v2`
