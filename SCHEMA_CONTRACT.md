@@ -94,6 +94,7 @@ Append-only tables may omit `updated_at` if no row updates are expected.
 ### 4.3 JSONB provenance
 Where raw or semi-structured payloads are needed, use `jsonb`.
 Never copy full raw LinkedIn payloads into the canonical profile table.
+When normalized or derived values are introduced, preserve the raw/source values separately where needed for traceability and replay.
 
 ### 4.4 Searchable text
 Store cleaned normalized text separately from raw payloads where appropriate.
@@ -117,6 +118,29 @@ Use:
 - `is_active boolean not null default true`
 - `superseded_at timestamptz null`
 where the same document family can refresh over time.
+
+### 4.7 Canonicalization, precedence, and ambiguity
+Canonicalization helpers must be deterministic and idempotent.
+
+Recommended reusable helper surfaces:
+- email comparison-key normalization
+- LinkedIn username / URL normalization for candidates and companies
+- company-name fallback normalization
+- experience date / precision / current-role normalization
+- deterministic source-hash and content-hash builders for dedupe decisions
+
+Source precedence for overwrite decisions is:
+1. `linkedin_import` / direct LinkedIn sync
+2. `legacy_backfill` with LinkedIn-backed source data
+3. `resume_upload`
+4. `recruiter_note_summary` / `transcript_summary`
+5. `recruiter_note_raw` / `manual_profile_note`
+
+Rules:
+- lower-precedence inputs may fill blanks but must not overwrite stronger non-null values
+- equal-precedence reruns should keep the current stored value to remain idempotent
+- ambiguous candidate, company, experience, or document matches must be logged to a measurable support object and skipped or routed to manual review
+- ambiguous matches must not be auto-merged silently
 
 ---
 
@@ -170,6 +194,19 @@ where the same document family can refresh over time.
 - `current_*` fields and `experience_years` are **derived caches only**.
 - Work-history truth lives in `candidate_experiences_v2`.
 
+**Canonicalization / matching rules**
+- Treat rows as the same candidate only when:
+  1. the stable legacy candidate UUID already exists in `candidate_profiles_v2.id`, or
+  2. strong LinkedIn identity resolves unambiguously.
+- Strong LinkedIn identity means normalized `linkedin_username` and/or normalized `linkedin_url_normalized`.
+- Matching order is:
+  1. existing row on stable legacy candidate UUID reuse
+  2. exact match on normalized `linkedin_username`
+  3. exact match on normalized `linkedin_url_normalized`
+- If both LinkedIn keys are present and resolve to different candidate rows, treat the input as ambiguous.
+- Do **not** auto-merge candidates by name, title, location, skills, education, or other fuzzy profile similarity alone.
+- Preserve raw source refs in `source_record_refs`; normalized comparison keys live in the LinkedIn identity columns.
+
 ---
 
 ### 5.2 `candidate_emails_v2`
@@ -203,6 +240,13 @@ where the same document family can refresh over time.
 - Partial unique on `(candidate_id)` where `is_primary = true`
 - Index on `candidate_id`
 
+**Canonicalization rules**
+- `email_normalized` is the deterministic comparison key.
+- Normalize by trimming whitespace, stripping a leading `mailto:`, and lowercasing only.
+- Preserve the original incoming value in `email_raw`.
+- Treat rows as duplicates on `email_normalized`.
+- Do **not** apply provider-specific plus-tag or dot-removal heuristics in the canonical key.
+
 ---
 
 ### 5.3 `companies_v2`
@@ -231,6 +275,7 @@ where the same document family can refresh over time.
 | `last_enrichment_sync` | `timestamptz` | yes |  |
 | `data_source` | `text` | no | primary source provenance |
 | `identity_basis` | `text` | no | `linkedin_id`, `linkedin_username`, `linkedin_url`, `name` |
+| `source_record_refs` | `jsonb` | yes | Raw source company names / provenance refs |
 | `created_at` | `timestamptz` | no |  |
 | `updated_at` | `timestamptz` | no |  |
 
@@ -242,12 +287,18 @@ where the same document family can refresh over time.
 - Index on `normalized_name`
 
 **Source-of-truth rules**
+- Preserve raw source display names and provenance separately from fallback matching keys via `source_record_refs`.
 - Do **not** enforce DB-level uniqueness on `normalized_name` alone.
+- Normalize `normalized_name` for fallback matching only; preserve canonical display `name` separately.
 - Company resolution precedence is:
   1. `linkedin_id`
   2. `linkedin_username`
   3. `linkedin_url_normalized`
-  4. `normalized_name` fallback
+  4. `normalized_name` fallback only when strong identity is absent
+- If multiple strong LinkedIn inputs resolve to different company rows, the match is ambiguous.
+- If strong identity is absent and `normalized_name` matches multiple rows, the match is ambiguous.
+- If fallback name matching would attach a row whose strong identity contradicts the incoming evidence, treat it as ambiguous instead of auto-merging.
+- Never auto-merge across contradictory strong LinkedIn identities.
 
 ---
 
@@ -287,6 +338,54 @@ where the same document family can refresh over time.
 **Source-of-truth rules**
 - This table drives current-role derivation.
 - When only month precision is known, normalize to the first day of that month and preserve true precision in the precision columns.
+
+**Canonicalization rules**
+- Normalize date precision into `year`, `month`, `day`, `present`, or `unknown`.
+- When only year precision is known, normalize the stored date to January 1 of that year.
+- When only month precision is known, normalize the stored date to the first day of that month.
+- When the role is current/present, store `end_date = null`, `end_date_precision = 'present'`, and `is_current = true`.
+- Preserve the raw company text in `raw_company_name` even when `company_id` resolves.
+- `source_hash` must be built deterministically from normalized identity fields, not free-text description noise.
+- The `source_hash` inputs are:
+  - `candidate_id`
+  - normalized `title`
+  - resolved `company_id` when present, otherwise normalized `raw_company_name`
+  - normalized `start_date` + `start_date_precision`
+  - normalized `end_date` + `end_date_precision`
+  - normalized `is_current`
+
+### 5.4a `canonicalization_ambiguities`
+**Purpose:** durable log of candidate, company, experience, and source-document ambiguity decisions that require skip or manual review.
+
+| Column | Type | Null | Notes |
+|---|---|---:|---|
+| `id` | `uuid` | no | PK |
+| `entity_type` | `text` | no | `candidate_profile`, `company`, `candidate_experience`, `candidate_source_document` |
+| `ambiguity_type` | `text` | no | machine-readable reason |
+| `source_system` | `text` | yes | upstream system or pipeline |
+| `source_record_ref` | `text` | yes | upstream record identifier |
+| `normalized_input` | `jsonb` | no | deterministic normalized decision payload |
+| `matched_record_ids` | `uuid[]` | yes | conflicting candidate/company/document ids |
+| `recommended_action` | `text` | no | `skip`, `manual_review` |
+| `status` | `text` | no | `open`, `resolved`, `ignored` |
+| `resolution_notes` | `text` | yes | human follow-up notes |
+| `created_at` | `timestamptz` | no | default now() |
+| `updated_at` | `timestamptz` | no | default now() |
+| `resolved_at` | `timestamptz` | yes | when manually resolved |
+
+**Constraints / indexes**
+- PK on `id`
+- Check on `entity_type`
+- Check on `recommended_action`
+- Check on `status`
+- Index on `(status, entity_type)`
+- Index on `(entity_type, ambiguity_type)`
+- Index on `(source_system, source_record_ref)`
+
+**Rules**
+- Record ambiguous candidate, company, experience, and source-document matches here instead of silently auto-merging.
+- Repeated runs should reuse the same open ambiguity when the normalized input is identical or otherwise avoid multiplying silent ambiguity state.
+- Downstream backfills may skip or route these rows to manual review, but they must remain measurable.
 
 ---
 
@@ -335,6 +434,18 @@ Examples:
 - Every candidate must have at least one active `linkedin_profile` source document.
 - Resume uploads create separate source documents; do not merge resume text into LinkedIn source rows.
 - Raw recruiter notes and approved summaries are separate rows.
+- Canonicalization must classify incoming documents as one of:
+  - `no_op`: same logical document and same normalized content
+  - `supersede`: same logical document family but new version/content
+  - `parallel`: genuinely separate active document
+  - `ambiguous`: insufficient or conflicting identity; do not auto-merge
+- Logical-identity rules:
+  - `linkedin_profile`: exactly one logical document family per candidate; same content = `no_op`, changed content = `supersede`
+  - `resume`: use `metadata_json.document_identity_key`, then `external_source_ref`, then normalized `source_url`; same key + same content = `no_op`, same key + changed content = `supersede`, different key = `parallel`
+  - anonymous resume with no stable key: identical content to exactly one active anonymous resume = `no_op`; no active anonymous resume = `parallel`; conflicting anonymous resume content = `ambiguous`
+  - `recruiter_note_raw` / `manual_profile_note`: append-oriented by default; stable key/ref/url allows versioning, otherwise only exact same-content duplicates are `no_op`
+  - `recruiter_note_summary` / `transcript_summary`: if tied to a stable upstream artifact, version within that family; otherwise same-content duplicate = `no_op`, different content = `parallel`
+- Supersede decisions should be applied transactionally so only one active row remains current per logical document family.
 
 ---
 
@@ -375,6 +486,12 @@ Examples:
 - Raw recruiter notes: if short, one chunk; if long, paragraph/section chunks.
 - Approved note summary / transcript summary: one or more concise chunks by topic.
 
+**Duplicate rules**
+- Duplicate identity is within a document version only.
+- Same `source_document_id` + same `chunk_index` is the same logical chunk.
+- If chunk text changes while the same `source_document_id` and `chunk_index` are reused, treat the upstream document-versioning flow as invalid rather than silently mutating chunk identity.
+- `section_key` can aid stable chunk classification, but it does not replace the document-version boundary.
+
 ---
 
 ### 5.7 `candidate_chunk_embeddings`
@@ -405,7 +522,9 @@ Examples:
 **Rules**
 - Multiple embeddings per candidate are expected.
 - One candidate may have many chunks and therefore many embeddings.
+- Same `chunk_id` + `model_name` + `model_version` is the same logical embedding.
 - Rebuilds create a new row or update the row only if the logical model/version is unchanged.
+- Re-runs with the same logical model/version should no-op or update in place rather than create a second logical duplicate.
 
 ---
 
@@ -440,6 +559,11 @@ It exists for admin views, debugging, coarse retrieval, and flattened candidate 
 - FK `candidate_id -> candidate_profiles_v2(id)` on delete cascade
 - FK `current_company_id -> companies_v2(id)` on delete set null
 - Index on `current_company_id`
+
+**Rules**
+- This table is a rebuildable one-row-per-candidate aggregate cache.
+- Treat it as replace/rebuild state, not a merge target.
+- Do not use it as the only embedding or dedupe surface; chunk-level retrieval remains authoritative.
 
 ---
 

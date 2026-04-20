@@ -202,7 +202,7 @@ Done when:
 - The retrieval corpus can store multiple documents and multiple embeddings per candidate.
 - A candidate can have LinkedIn-only evidence, LinkedIn plus resume evidence, and recruiter-note evidence without schema changes.
 
-## [ ] Task 5: Implement Canonicalization Rules
+## [x] Task 5: Implement Canonicalization Rules
 - Normalize emails into deterministic comparison keys while preserving raw values.
 - Normalize LinkedIn identity fields for both candidates and companies:
   - usernames

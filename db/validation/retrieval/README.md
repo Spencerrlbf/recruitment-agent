@@ -7,6 +7,7 @@ Current checks:
 - PK/FK and trigger checks
 - required uniqueness checks
 - required non-vector and ANN index checks
+- Task 5 source-document decision helper existence and semantic behavior checks
 - rollback smoke test coverage for multi-document, multi-chunk, and multi-embedding candidate evidence
 
 Later data-quality checks can add:

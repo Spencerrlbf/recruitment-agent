@@ -2,11 +2,12 @@
 
 Use this directory for SQL that validates the canonical layer after migrations and backfills land.
 
-This starts with schema-contract checks for Task 3 and can later expand into data-quality checks after backfills exist.
+This starts with schema-contract checks for Task 3 and expands in Task 5 into canonicalization support checks and semantic rule-behavior tests before later data-quality checks arrive with backfills.
 
 Expected check types:
-- table, extension, helper, and trigger existence
+- table, extension, helper, trigger, and support-object existence
 - PK/FK, uniqueness, and index checks
+- semantic canonicalization behavior checks for normalization, dedupe decisions, source precedence, and ambiguity handling
 - smoke tests that exercise canonical inserts and constraint behavior
 - later row-count, orphan, duplicate, and coverage checks after backfill work exists
 
