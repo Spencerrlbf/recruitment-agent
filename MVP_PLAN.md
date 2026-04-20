@@ -50,9 +50,15 @@ These are the existing tasks that should be treated as the shortest path to a us
 - [ ] Task 6a: Implement Company Backfill Script And Preflight Validation
 - [ ] Task 6b: Run 100-Row Pilot Company Backfill And Review Results
 - [ ] Task 6c: Run Full Company Backfill
-- [ ] Task 7: Backfill Candidate Profiles And Emails
-- [ ] Task 8: Backfill Candidate Experiences
-- [ ] Task 9: Backfill Candidate Source Documents
+- [ ] Task 7a: Implement Candidate Profile And Email Backfill Script And Preflight Validation
+- [ ] Task 7b: Run 100-Row Pilot Candidate Profile And Email Backfill And Review Results
+- [ ] Task 7c: Run Full Candidate Profile And Email Backfill
+- [ ] Task 8a: Implement Candidate Experience Backfill Script And Preflight Validation
+- [ ] Task 8b: Run 100-Row Pilot Candidate Experience Backfill And Review Results
+- [ ] Task 8c: Run Full Candidate Experience Backfill
+- [ ] Task 9a: Implement Candidate Source Document Backfill Script And Preflight Validation
+- [ ] Task 9b: Run 100-Row Pilot Candidate Source Document Backfill And Review Results
+- [ ] Task 9c: Run Full Candidate Source Document Backfill
 - [ ] Task 10: Build Candidate Search Chunks
 - [ ] Task 11: Add Candidate Chunk Embeddings And Retrieval Indexes
 - [ ] Task 13: Add Validation And QA Checks
