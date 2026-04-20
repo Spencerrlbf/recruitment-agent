@@ -47,7 +47,9 @@ These are the existing tasks that should be treated as the shortest path to a us
 ## Candidate Searchability
 - [x] Task 4: Create Retrieval Corpus Tables And Constraints
 - [ ] Task 5: Implement Canonicalization Rules
-- [ ] Task 6: Backfill Companies
+- [ ] Task 6a: Implement Company Backfill Script And Preflight Validation
+- [ ] Task 6b: Run 100-Row Pilot Company Backfill And Review Results
+- [ ] Task 6c: Run Full Company Backfill
 - [ ] Task 7: Backfill Candidate Profiles And Emails
 - [ ] Task 8: Backfill Candidate Experiences
 - [ ] Task 9: Backfill Candidate Source Documents

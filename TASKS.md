@@ -243,12 +243,12 @@ Done when:
 - Raw source values remain available alongside normalized/derived values where needed for traceability.
 - Canonicalization is independent from chunking and embedding generation.
 
-## [ ] Task 6: Backfill Companies
+## [ ] Task 6a: Implement Company Backfill Script And Preflight Validation
 - Scope for this task is **only** the legacy `companies` table -> `companies_v2`.
 - Do **not** read from `company_staging` in this task.
 - Do **not** create `companies_v2` rows from candidate profile or experience payloads in this task.
 - Build a dedicated checkpoint-aware backfill entrypoint under `scripts/backfills/` for the legacy `companies` -> `companies_v2` migration.
-- Run the backfill only after the mapping, normalization, and duplicate-handling rules below are implemented.
+- Do **not** run any real write backfill in this task beyond dry-run and duplicate-validation fixtures.
 - Follow `SCHEMA_CONTRACT.md` exactly for the destination schema. `companies_v2` columns used by this backfill are:
   - `name text not null`
   - `normalized_name text not null`
@@ -324,9 +324,9 @@ Done when:
   - keep writes set-based or batched where possible instead of row-by-row chatty inserts
   - advance checkpoints only after successful durable batch writes
   - support `--dry-run` without mutating destination rows or checkpoint state
-- Before any full backfill run, complete a required preflight validation pass:
+- Complete a required preflight validation pass in this task:
   - run a deterministic `--dry-run` on the first 100 legacy `companies` rows that would be processed by the real script order
-  - generate a QA report for that 100-row dry-run and review it before permitting a full run
+  - generate a QA report for that 100-row dry-run and review it
   - create controlled duplicate-validation fixtures in a safe development or sandbox environment instead of mutating the real legacy source table
   - verify duplicate handling for all identity paths:
     - duplicate `linkedin_id`
@@ -335,12 +335,11 @@ Done when:
     - name-only fallback duplicate on `normalized_name`
     - conflicting strong-identity inputs that must resolve to `ambiguous`
   - confirm the duplicate-validation fixtures produce the expected resolver outcomes and do not silently create duplicate canonical companies
-  - block the full backfill until the dry-run report and duplicate-validation results are reviewed and approved
-- Emit a QA report for the run under `reports/qa/` with counts for:
+- Emit a QA report for Task 6a under `reports/qa/` with counts for:
   - rows read
   - rows normalized
-  - rows inserted
-  - rows matched/updated
+  - rows that would be inserted
+  - rows that would be matched/updated
   - rows skipped
   - ambiguous rows
   - duplicate-reduction totals by strong-identity match vs name-fallback match
@@ -354,12 +353,46 @@ Done when:
 - A deterministic `--dry-run` on the first 100 legacy `companies` rows has been completed and reviewed.
 - Controlled duplicate-validation fixtures have been executed in a safe development or sandbox environment for `linkedin_id`, `linkedin_username`, `linkedin_url_normalized`, name-only fallback, and ambiguous strong-identity conflict cases.
 - Duplicate-validation results confirm the resolver prevents silent duplicate canonical companies across all identity paths.
-- The full backfill is not run until the dry-run report and duplicate-validation results are approved.
+- The Task 6a QA report captures dry-run findings and duplicate-validation outcomes.
+- No pilot write or full backfill is performed until Task 6a is approved.
+
+## [ ] Task 6b: Run 100-Row Pilot Company Backfill And Review Results
+- After Task 6a approval, run a controlled 100-row pilot write using the same deterministic script order validated in Task 6a.
+- The 100 pilot-written `companies_v2` rows may remain in place and become part of the final canonical dataset.
+- Review the resulting `companies_v2` rows directly in the database before permitting the full migration.
+- Confirm the pilot preserves the required stored fields:
+  - `name`
+  - `normalized_name`
+  - `data_source`
+  - `identity_basis`
+  - `source_record_refs`
+- Confirm website values are normalized to scheme + host only before storage.
+- Confirm canonical uniqueness rules on `linkedin_id`, `linkedin_username`, and `linkedin_url_normalized` are respected without enforcing uniqueness on `normalized_name` alone.
+- Confirm ambiguous matches are logged and skipped rather than silently merged.
+- Confirm the later full backfill can safely continue from the pilot-written state without creating duplicate canonical company rows or duplicate provenance entries for the same source rows.
+- Emit a pilot QA report under `reports/qa/` with actual inserted, updated, skipped, ambiguous, and duplicate-check outcomes for the 100 written rows.
+
+Done when:
+- A controlled 100-row pilot write has been completed after Task 6a approval.
+- The pilot-written canonical rows are allowed to remain in place for the final migration.
+- The pilot rows have been reviewed in the database.
+- Pilot QA confirms the expected field mapping, normalization, duplicate handling, and ambiguity handling behavior.
+- The later full backfill is proven to continue safely from the pilot-written state without duplicating canonical company rows or provenance entries for the same source rows.
+- The full backfill is not run until the pilot-write review is approved.
+
+## [ ] Task 6c: Run Full Company Backfill
+- After Task 6b approval, run the full `companies` -> `companies_v2` backfill using the approved script and checkpoint strategy.
+- Continue safely from the pilot-written state or another explicitly approved checkpoint state.
+- Preserve the same mapping, normalization, precedence, ambiguity handling, and idempotency rules validated in Tasks 6a and 6b.
+- Emit a final QA report for the full migration under `reports/qa/`.
+
+Done when:
+- The full backfill has been completed only after Task 6a and Task 6b approval.
 - `companies_v2` rows written by the backfill populate `name`, `normalized_name`, `data_source`, and `identity_basis`, and preserve raw provenance in `source_record_refs`.
 - Website values are normalized to scheme + host only before storage.
 - Canonical uniqueness rules on `linkedin_id`, `linkedin_username`, and `linkedin_url_normalized` are respected without enforcing uniqueness on `normalized_name` alone.
 - Ambiguous matches are logged and skipped rather than silently merged.
-- A QA report captures rows read, inserted, updated, skipped, ambiguous, duplicate-reduction counts, preflight dry-run findings, and duplicate-validation outcomes.
+- A QA report captures rows read, inserted, updated, skipped, ambiguous, duplicate-reduction counts, and final migration outcomes.
 - Re-running the backfill does not create duplicate `companies_v2` rows or duplicate provenance entries.
 - Company resolution precedence is reproducible from the stored data and helper rules.
 
