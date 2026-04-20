@@ -1,5 +1,0 @@
--- Placeholder scaffold for retrieval coverage checks.
--- Purpose:
---   Measure source-document, chunk, and embedding coverage for each candidate population under test.
---
--- Fill this file with concrete SELECT statements after retrieval tables exist.

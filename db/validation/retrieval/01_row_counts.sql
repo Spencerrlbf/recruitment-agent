@@ -1,5 +1,0 @@
--- Placeholder scaffold for retrieval row-count validation.
--- Purpose:
---   Compare counts across retrieval layers such as source documents, chunks, and embeddings.
---
--- Fill this file with concrete SELECT statements after retrieval tables exist.

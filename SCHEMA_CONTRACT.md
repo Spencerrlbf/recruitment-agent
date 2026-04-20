@@ -108,6 +108,8 @@ Recommended initial approach:
 - store `embedding_dimensions smallint not null`
 - store `model_name text not null`
 - add ANN indexes only for the currently active retrieval model/dimension
+- initial production ANN target for the candidate corpus is `model_name = 'text-embedding-3-small'` with `embedding_dimensions = 1536`
+- use cosine distance with a single HNSW index for that active production combination; if the active production combo changes later, replace the index rather than adding mixed-dimension ANN indexes
 
 ### 4.6 Soft versioning
 Use:
@@ -823,4 +825,3 @@ Codex should be able to generate DDL and validation scaffolding from this docume
 - missing candidate-vs-job boundaries
 - missing reference-candidate behavior
 - missing source-of-truth rules
-

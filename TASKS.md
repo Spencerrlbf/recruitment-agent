@@ -136,7 +136,7 @@ Done when:
 - Test inserts work.
 - Canonical tables do not depend on retrieval artifacts to remain valid.
 
-## [ ] Task 4: Create Candidate Retrieval Corpus Tables, Constraints, And Retrieval Validation
+## [x] Task 4: Create Candidate Retrieval Corpus Tables, Constraints, And Retrieval Validation
 - Follow `SCHEMA_CONTRACT.md` exactly for **Layer B — Candidate retrieval corpus only**.
 - Create only these candidate retrieval tables:
   - `candidate_source_documents`
