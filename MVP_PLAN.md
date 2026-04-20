@@ -11,6 +11,7 @@ Its purpose is only to:
 - [x] Task 1: Lock The Canonical And Retrieval Data Model
 - [x] Task 2: Create Migration, Checkpoint, And Validation Scaffolding
 - [x] Task 3: Create Canonical Tables And Constraints
+- [x] Task 4: Create Retrieval Corpus Tables And Constraints
 
 ## MVP Goal
 The MVP should prove the core product works end to end.
@@ -44,7 +45,7 @@ These are the existing tasks that should be treated as the shortest path to a us
 - [x] Task 3: Create Canonical Tables And Constraints
 
 ## Candidate Searchability
-- [ ] Task 4: Create Retrieval Corpus Tables And Constraints
+- [x] Task 4: Create Retrieval Corpus Tables And Constraints
 - [ ] Task 5: Implement Canonicalization Rules
 - [ ] Task 6: Backfill Companies
 - [ ] Task 7: Backfill Candidate Profiles And Emails
