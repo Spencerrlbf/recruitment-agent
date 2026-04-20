@@ -203,13 +203,44 @@ Done when:
 - A candidate can have LinkedIn-only evidence, LinkedIn plus resume evidence, and recruiter-note evidence without schema changes.
 
 ## [ ] Task 5: Implement Canonicalization Rules
-- Normalize emails.
+- Normalize emails into deterministic comparison keys while preserving raw values.
+- Normalize LinkedIn identity fields for both candidates and companies:
+  - usernames
+  - canonical URLs
+  - normalized URLs used for matching
 - Resolve canonical companies by strong identity first and name fallback last.
-- Normalize experience dates, current-role flags, raw company names, and LinkedIn identity fields.
+- Normalize company names for fallback matching only; preserve raw display/source names separately.
+- Normalize experience dates, date precision, current-role flags, and raw company names.
+- Define duplicate-decision rules before any backfill writes land:
+  - `candidate_profiles_v2`: treat rows as the same candidate only on stable legacy candidate UUID reuse or strong LinkedIn identity; do **not** auto-merge candidates by name/title/location similarity alone
+  - `candidate_emails_v2`: treat rows as duplicates on normalized email
+  - `companies_v2`: resolve duplicates by precedence:
+    1. `linkedin_id`
+    2. `linkedin_username`
+    3. `linkedin_url_normalized`
+    4. normalized-name fallback only when strong identity is absent and no contradictory evidence exists
+  - `candidate_experiences_v2`: treat rows as duplicates on deterministic per-candidate source hash built from normalized experience identity fields
+  - `candidate_source_documents`: define when an incoming row is:
+    - the same logical document and should be a no-op
+    - a new version of an existing logical document and should supersede the older active row
+    - a genuinely new parallel document that should remain separate
+  - `candidate_search_chunks`: treat duplicates within a document version by stable document identity plus chunk position/logical key
+  - `candidate_chunk_embeddings`: treat duplicates on chunk identity plus embedding model/version identity
+  - `candidate_search_documents`: treat this as a rebuildable one-row-per-candidate aggregate cache, not a merge target
+- Define source-precedence rules so lower-trust or weaker-identity inputs do not overwrite stronger evidence without an explicit rule.
+- Define ambiguity handling:
+  - ambiguous candidate or company matches must be logged and skipped or routed to manual review
+  - ambiguous matches must **not** be auto-merged silently
+- Preserve raw values and provenance wherever normalized or derived values are introduced.
 
 Done when:
-- Canonicalization behavior is deterministic.
+- Canonicalization behavior is deterministic and idempotent.
 - Helpers exist in reusable SQL or application code.
+- Duplicate-decision rules are explicit for candidate profiles, emails, companies, experiences, source documents, chunks, embeddings, and aggregate search rows.
+- Source-precedence rules are explicit and reproducible.
+- Ambiguous match handling is explicit and measurable.
+- Source-document logic can distinguish no-op duplicates from new versions.
+- Raw source values remain available alongside normalized/derived values where needed for traceability.
 - Canonicalization is independent from chunking and embedding generation.
 
 ## [ ] Task 6: Backfill Companies
