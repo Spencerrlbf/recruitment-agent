@@ -244,13 +244,124 @@ Done when:
 - Canonicalization is independent from chunking and embedding generation.
 
 ## [ ] Task 6: Backfill Companies
-- Seed `companies_v2` from the existing company data.
-- Deduplicate against canonical identity rules.
-- Preserve traceability and source-quality markers.
+- Scope for this task is **only** the legacy `companies` table -> `companies_v2`.
+- Do **not** read from `company_staging` in this task.
+- Do **not** create `companies_v2` rows from candidate profile or experience payloads in this task.
+- Build a dedicated checkpoint-aware backfill entrypoint under `scripts/backfills/` for the legacy `companies` -> `companies_v2` migration.
+- Run the backfill only after the mapping, normalization, and duplicate-handling rules below are implemented.
+- Follow `SCHEMA_CONTRACT.md` exactly for the destination schema. `companies_v2` columns used by this backfill are:
+  - `name text not null`
+  - `normalized_name text not null`
+  - `linkedin_id text null`
+  - `linkedin_username text null`
+  - `linkedin_url text null`
+  - `linkedin_url_normalized text null`
+  - `website text null`
+  - `description text null`
+  - `industries text[] null`
+  - `specialties text[] null`
+  - `company_type text null`
+  - `staff_count integer null`
+  - `staff_count_range text null`
+  - `headquarters_city text null`
+  - `headquarters_country text null`
+  - `logo_url text null`
+  - `enrichment_status text null`
+  - `last_enrichment_sync timestamptz null`
+  - `data_source text not null`
+  - `identity_basis text not null`
+  - `source_record_refs jsonb null`
+- Respect the canonical uniqueness and matching rules for `companies_v2`:
+  - partial unique on `linkedin_id` where not null
+  - partial unique on `linkedin_username` where not null
+  - partial unique on `linkedin_url_normalized` where not null
+  - index on `normalized_name`
+  - do **not** enforce uniqueness on `normalized_name` alone
+- Map legacy `companies` values into `companies_v2` as follows unless `SCHEMA_CONTRACT.md` is updated first:
+  - `name` <- legacy company display name
+  - `normalized_name` <- normalized `name`
+  - `linkedin_id` <- legacy `linkedin_id`
+  - `linkedin_username` <- normalized legacy `linkedin_username`
+  - `linkedin_url` <- legacy `linkedin_url`
+  - `linkedin_url_normalized` <- normalized legacy `linkedin_url`
+  - `website` <- cleaned legacy `website`
+  - `description` <- legacy `description`
+  - `industries` <- legacy `industries`
+  - `specialties` <- legacy `specialties` when present, otherwise `null`
+  - `company_type` <- legacy `company_type` when present, otherwise `null`
+  - `staff_count` <- legacy `staff_count`
+  - `staff_count_range` <- derived from `staff_count`
+  - `headquarters_city` <- legacy headquarters city when present, otherwise `null`
+  - `headquarters_country` <- legacy headquarters country when present, otherwise `null`
+  - `logo_url` <- legacy `logo_url` when present, otherwise `null`
+  - `enrichment_status` and `last_enrichment_sync` <- carry over legacy values when present and contract-compatible, otherwise leave `null`
+  - `data_source` <- `'legacy_backfill'`
+  - `identity_basis` <- strongest populated identity on the stored row: `linkedin_id`, then `linkedin_username`, then `linkedin_url`, otherwise `name`
+  - `source_record_refs` <- raw legacy provenance including the source table name, legacy row id, raw company name, raw website, and any raw LinkedIn identifiers used during matching
+- Normalize and clean values before matching or writing:
+  - trim whitespace and convert blank strings to `null`
+  - normalize company names with the canonical company-name helper
+  - normalize LinkedIn usernames and URLs with the canonicalization helpers from Task 5
+  - normalize `website` to scheme + host only; drop path, query string, fragment, and trailing slash (for example `http://www.youtube.com/jobs` -> `http://www.youtube.com`)
+  - preserve important raw source values inside `source_record_refs` for traceability
+- Use the Task 5 canonicalization helpers as the matching contract for this task.
+- For each legacy company row, resolve identity in this precedence order:
+  - exact `linkedin_id`
+  - exact normalized `linkedin_username`
+  - exact normalized `linkedin_url_normalized`
+  - normalized-name fallback only when strong LinkedIn identity is absent
+- Handle resolver outcomes explicitly:
+  - `match_existing` -> update one existing `companies_v2` row using field-level precedence rules
+  - `create_new` -> insert one new `companies_v2` row
+  - `ambiguous` -> record the ambiguity, skip the write, and continue
+- Never auto-merge on ambiguous matches.
+- Never overwrite stronger non-null stored identity values with weaker incoming values.
+- Lower-precedence inputs may fill blank nullable fields, but equal-precedence reruns must preserve the stored value so reruns remain idempotent.
+- `source_record_refs` updates must be deduplicated so reruns do not append the same legacy provenance twice.
+- Optimize the backfill for large legacy company volume:
+  - process strong-identity rows first, then name-only fallback rows
+  - use deterministic batching and a stable monotonic cursor from the legacy `companies` table
+  - keep writes set-based or batched where possible instead of row-by-row chatty inserts
+  - advance checkpoints only after successful durable batch writes
+  - support `--dry-run` without mutating destination rows or checkpoint state
+- Before any full backfill run, complete a required preflight validation pass:
+  - run a deterministic `--dry-run` on the first 100 legacy `companies` rows that would be processed by the real script order
+  - generate a QA report for that 100-row dry-run and review it before permitting a full run
+  - create controlled duplicate-validation fixtures in a safe development or sandbox environment instead of mutating the real legacy source table
+  - verify duplicate handling for all identity paths:
+    - duplicate `linkedin_id`
+    - duplicate `linkedin_username`
+    - duplicate `linkedin_url_normalized`
+    - name-only fallback duplicate on `normalized_name`
+    - conflicting strong-identity inputs that must resolve to `ambiguous`
+  - confirm the duplicate-validation fixtures produce the expected resolver outcomes and do not silently create duplicate canonical companies
+  - block the full backfill until the dry-run report and duplicate-validation results are reviewed and approved
+- Emit a QA report for the run under `reports/qa/` with counts for:
+  - rows read
+  - rows normalized
+  - rows inserted
+  - rows matched/updated
+  - rows skipped
+  - ambiguous rows
+  - duplicate-reduction totals by strong-identity match vs name-fallback match
+  - preflight 100-row dry-run findings
+  - duplicate-validation fixture outcomes by identity path
 
 Done when:
-- Canonical companies exist with measurable duplicate reduction.
-- Company resolution precedence is reproducible.
+- A dedicated `companies` backfill script exists under `scripts/backfills/`.
+- The script supports deterministic ordering, resumable checkpoints, safe reruns, and `--dry-run` mode.
+- The script processes only the legacy `companies` table for this task.
+- A deterministic `--dry-run` on the first 100 legacy `companies` rows has been completed and reviewed.
+- Controlled duplicate-validation fixtures have been executed in a safe development or sandbox environment for `linkedin_id`, `linkedin_username`, `linkedin_url_normalized`, name-only fallback, and ambiguous strong-identity conflict cases.
+- Duplicate-validation results confirm the resolver prevents silent duplicate canonical companies across all identity paths.
+- The full backfill is not run until the dry-run report and duplicate-validation results are approved.
+- `companies_v2` rows written by the backfill populate `name`, `normalized_name`, `data_source`, and `identity_basis`, and preserve raw provenance in `source_record_refs`.
+- Website values are normalized to scheme + host only before storage.
+- Canonical uniqueness rules on `linkedin_id`, `linkedin_username`, and `linkedin_url_normalized` are respected without enforcing uniqueness on `normalized_name` alone.
+- Ambiguous matches are logged and skipped rather than silently merged.
+- A QA report captures rows read, inserted, updated, skipped, ambiguous, duplicate-reduction counts, preflight dry-run findings, and duplicate-validation outcomes.
+- Re-running the backfill does not create duplicate `companies_v2` rows or duplicate provenance entries.
+- Company resolution precedence is reproducible from the stored data and helper rules.
 
 ## [ ] Task 7: Backfill Candidate Profiles And Emails
 - Copy one stable profile row per candidate.
