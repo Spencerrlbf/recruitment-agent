@@ -247,7 +247,7 @@ def clean_website(raw_value: Any) -> str | None:
     path = parsed.path or ""
 
     if not netloc and path:
-        netloc = path.lower()
+        netloc = path.lstrip("/").lower()
         path = ""
 
     if not netloc:
