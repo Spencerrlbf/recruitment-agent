@@ -924,7 +924,15 @@ Done when:
     - `create_new` -> **do not create** a new `companies_v2` row in this task; treat the experience as unresolved and store `company_id = null`
     - `ambiguous` -> record a `candidate_experience` ambiguity in `canonicalization_ambiguities`, keep `company_id = null`, and continue processing the experience row
   - ambiguous company resolution must never create or merge canonical company rows silently
-  - if company resolution is ambiguous, the ambiguity log must include enough normalized input to explain the decision and must reuse the same open ambiguity on rerun instead of multiplying duplicate open ambiguity rows
+  - if company resolution is ambiguous, the ambiguity log must reuse the same open ambiguity on rerun instead of multiplying duplicate open ambiguity rows
+  - for Task 8 company-resolution ambiguities, `normalized_input` must be a deterministic JSON object with exactly:
+    - `legacy_candidate_id`
+    - resolved `candidate_id`
+    - `source_path`
+    - `source_array_index`
+    - `experience_identity` object containing normalized `title`, normalized `raw_company_name`, normalized `start_date`, `start_date_precision`, normalized `end_date`, `end_date_precision`, and normalized `is_current`
+    - `company_resolution_inputs` object containing normalized `linkedin_id`, normalized `linkedin_username`, normalized `linkedin_url_normalized`, and normalized fallback `company_name`
+  - encode absent values as explicit `null` and do **not** include run-specific timestamps, counters, or nondeterministic ordering in `normalized_input`
   - experience row dedupe/idempotency rules are:
     - canonical uniqueness guard = `(candidate_id, source_hash)`
     - `source_hash` must be built from the schema-contract inputs only:
@@ -940,6 +948,12 @@ Done when:
     - `match_existing` when the same deterministic source record reference already exists for that candidate in `source_payload`, or when `(candidate_id, source_hash)` already exists
     - `create_new` when candidate linkage exists and no existing canonical row matches by source record reference or source hash
     - `skip` when candidate linkage is missing or the source item is structurally empty after normalization
+    - when `match_existing` resolves and the incoming row points to the same logical experience row:
+      - `experience_index` must update to the current chosen source-array ordinal on rerun so stored ordering continues to reflect current source order
+      - `title`, `description`, `location`, `raw_company_name`, and `source_company_linkedin_username` may fill blanks or replace values only when the normalized identity of the experience row does not change; whitespace-only or casing-only churn must not force updates
+      - `start_date`, `start_date_precision`, `end_date`, `end_date_precision`, `is_current`, `company_id`, and `source_hash` may be recomputed and updated only when the recomputed normalized identity still refers to the same deterministic source record reference and does not collide with another existing `(candidate_id, source_hash)` row
+      - if recomputing normalized identity would collide with a different existing experience row for the same candidate, do **not** silently merge or overwrite; log/skip it as an ambiguity instead
+      - `source_payload` should be replaced with the latest deterministic provenance object for that same source row, not appended as history
   - reruns must not create duplicate experience rows
   - reruns must not create duplicate open ambiguity rows
   - reruns must not append duplicate provenance history:
@@ -1006,6 +1020,7 @@ Done when:
     - same candidate + same experience with whitespace/case noise in title/company/date precision
     - same candidate + same experience with description-only differences
     - punctuation-significant title differences that should remain distinct
+    - reorder-only reruns where the same logical experience changes source-array position and `experience_index` must update deterministically without creating a duplicate row
   - explicitly validate missing-candidate-link behavior
   - explicitly validate ambiguous-company-resolution behavior
   - confirm the preflight results show that reruns would not create duplicate experience rows or duplicate open ambiguity rows
@@ -1028,6 +1043,9 @@ Done when:
   - current-role counts
   - sample outcomes by action and company-match basis
   - duplicate-validation fixture outcomes
+- QA artifacts should be clearly named under `reports/qa/`, for example:
+  - `YYYYMMDD__qa_candidate_experiences_preflight.md`
+  - `YYYYMMDD__qa_candidate_experiences_preflight.json`
 
 Done when:
 - A dedicated candidate-experience backfill script exists under `scripts/backfills/`.
@@ -1042,7 +1060,7 @@ Done when:
 ## [ ] Task 8b: Run 100-Row Pilot Candidate Experience Backfill And Review Results
 - After Task 8a approval, run a committed 100-row pilot write using the same deterministic flattened source order validated in Task 8a.
 - The pilot must run only after the approved outputs of `Task 6c` and `Task 7c` are present in the target DB, including the approved Task 7c candidate-resolution mapping artifact.
-- The 100 pilot-written `candidate_experiences_v2` rows may remain in place and become part of the final canonical dataset.
+- The first 100 flattened source rows form the pilot cohort; any `candidate_experiences_v2` rows actually written for that cohort may remain in place and become part of the final canonical dataset.
 - Review the resulting pilot rows directly in the database before permitting the full migration.
 - Confirm the pilot preserves the required stored fields and semantics:
   - `candidate_id`
@@ -1163,8 +1181,17 @@ Done when:
   - `entity_type = 'candidate_source_document'`
   - deterministic `source_system`
   - deterministic `source_record_ref`
-  - deterministic `normalized_input`
+  - deterministic `normalized_input` with exact Task 9 keys:
+    - `candidate_id`
+    - `legacy_candidate_id`
+    - `source_type`
+    - `document_identity_key`
+    - `external_source_ref`
+    - normalized `source_url`
+    - deterministic `content_hash`
+    - `ambiguity_family`
   - `recommended_action = 'manual_review'` or `skip` per the helper contract
+- encode absent values as explicit `null` and do **not** include run-specific timestamps, counters, or nondeterministic ordering in Task 9 `normalized_input`
 
 - Map legacy source fields into `candidate_source_documents` exactly as follows unless `SCHEMA_CONTRACT.md` is updated first:
 
@@ -1311,6 +1338,10 @@ Done when:
     - normalized content comparison is case-insensitive and whitespace-normalized through the helper
     - title-only changes must remain `no_op`
     - metadata-only changes must remain `no_op` when logical identity and normalized text are unchanged
+  - `no_op` behavior:
+    - perform no DB mutation to the existing `candidate_source_documents` row
+    - do **not** update `metadata_json`, `effective_at`, `updated_at`, `ingested_at`, `document_version`, `is_active`, or `superseded_at`
+    - count the decision in QA/report output only
   - `supersede` behavior:
     - must be applied transactionally
     - old active row becomes `is_active = false`
@@ -1395,6 +1426,9 @@ Done when:
     - candidates that would end without the required active `linkedin_profile` document; this count must resolve to zero before Task 9a approval
     - sample normalized-text outputs by family
     - duplicate-validation fixture outcomes by decision type
+- QA artifacts should be clearly named under `reports/qa/`, for example:
+  - `YYYYMMDD__qa_candidate_source_documents_preflight.md`
+  - `YYYYMMDD__qa_candidate_source_documents_preflight.json`
 
 Done when:
 - A dedicated `candidate_source_documents` backfill script exists under `scripts/backfills/`.
