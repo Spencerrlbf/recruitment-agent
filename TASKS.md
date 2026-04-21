@@ -508,6 +508,11 @@ Done when:
     - raw `full_name`
     - legacy `created_at`
     - legacy `updated_at`
+    - deterministic `canonical_match_outcome` object containing:
+      - `legacy_candidate_id`
+      - `resolved_candidate_id`
+      - `match_action` in `create_new` or `match_existing`
+      - `match_basis` in `legacy_id`, `linkedin_username`, or `linkedin_url_normalized`
 - Do **not** map these legacy `candidates` fields into `candidate_profiles_v2` in this task:
   - `current_title`
   - `current_company`
@@ -577,12 +582,19 @@ Done when:
   - deterministic normalized input payload
   - matched record ids when present
 - Repeated runs must reuse the same open ambiguity instead of multiplying identical open ambiguity rows.
+- Emit a deterministic candidate-resolution mapping artifact under `reports/qa/` keyed by legacy `candidates.id` with:
+  - `match_action` in `create_new`, `match_existing`, or `skip`
+  - `match_basis` in `legacy_id`, `linkedin_username`, `linkedin_url_normalized`, or `ambiguous`
+  - resolved canonical `candidate_profiles_v2.id` when present
+  - skip or ambiguity reason when no canonical row is written
+- Later Tasks 8 and 9 must consume this approved mapping artifact or an equivalently materialized lookup rather than re-deriving candidate links ad hoc from free-form JSONB.
 - New rows inserted by this backfill must reuse legacy `candidates.id`.
 - If a rerun or pre-existing canonical row resolves by strong LinkedIn identity to an existing row, do **not** create a second canonical profile row solely to force another id reuse.
 - Field overwrite rules for `candidate_profiles_v2` are:
   - higher-precedence existing values must not be overwritten by this legacy backfill
+  - when the incoming legacy-backed value is higher precedence than the stored source for that field under the shared canonical precedence contract, it may replace a weaker existing non-null value
+  - lower-precedence incoming values may fill blank nullable profile fields only
   - equal-precedence reruns must preserve existing non-null values so reruns remain idempotent
-  - this task may fill blank nullable profile fields only
   - `source_record_refs` updates must be deduplicated so reruns do not append the same legacy provenance twice
 - Email uniqueness and dedupe rules are:
   - `candidate_emails_v2` duplicate identity is `email_normalized`
@@ -591,7 +603,12 @@ Done when:
     - partial unique on `email_normalized` where not null
     - partial unique on `(candidate_id)` where `is_primary = true`
   - reruns must upsert by the natural key `(candidate_id, email_normalized)` and must not create duplicate email rows
-  - if the same normalized email already exists for the same candidate, `match_existing` and update only allowed fields
+  - if the same normalized email already exists for the same candidate, `match_existing` and merge fields using this matrix:
+    - `email_raw`: fill blank existing values only; equal-precedence reruns keep the existing non-blank display form
+    - `email_type`, `quality`, `result`, `resultcode`, `subresult`, `email_source`, and `raw_response`: legacy `candidate_emails` input may replace blanks from a weaker `candidates.email` fallback row; equal-precedence reruns preserve existing non-null values
+    - `verification_date` and `last_verification_attempt`: keep the newest non-null value
+    - `verification_attempts`: keep the greatest non-null value
+    - `is_primary`: recompute after candidate-level dedupe and primary-resolution; do not blindly preserve or overwrite the prior flag before that pass
   - if the same normalized email already exists for a different candidate, treat the incoming email row as ambiguous/conflicting, skip that email write, and log the condition against `entity_type = 'candidate_profile'` in `canonicalization_ambiguities`
 - Multiple legacy email rows for one candidate must be handled deterministically:
   - first dedupe within candidate on `email_normalized`
@@ -635,7 +652,8 @@ Done when:
   - deterministic email-row ordering within each candidate batch
   - `--dry-run`
   - checkpoint files under `scripts/checkpoints/`
-  - checkpoint advance only after both the profile batch write and the related email batch write have succeeded durably
+  - one DB transaction per candidate batch covering profile writes, related email writes, and ambiguity logging
+  - checkpoint advance only after that transaction has committed durably
   - QA report output under `reports/qa/`
 - Performance requirements for large volume are:
   - do not do row-by-row chatty writes when set-based or batched writes are possible
@@ -648,7 +666,7 @@ Done when:
   - bulk read existing canonical email matches using indexed lookups on:
     - `candidate_emails_v2.candidate_id`
     - `candidate_emails_v2.email_normalized`
-  - batch profiles first, then batch email writes separately for the resolved candidate ids
+  - batch profiles first, then batch email writes separately for the resolved candidate ids, but keep both write phases inside the same per-batch transaction so reruns never observe a half-written batch
 - Required preflight validation in this task:
   - run a deterministic `--dry-run` on the first 100 legacy `candidates` rows in real script order
   - in that dry-run, include all related legacy `candidate_emails` rows and any eligible `candidates.email` fallback rows for those 100 candidates
@@ -684,18 +702,21 @@ Done when:
   - candidates with one primary email after normalization
   - candidates with no primary email after normalization
   - candidates with multi-primary source conflicts resolved deterministically
+  - candidate-resolution mapping outcomes keyed by legacy `candidates.id`
   - sample outcomes for `match_existing`, `create_new`, `skip`, and email-conflict cases
   - duplicate-validation fixture outcomes
 - QA artifacts should be clearly named under `reports/qa/`, for example:
   - `YYYYMMDD__qa_candidate_profiles_emails_preflight.md`
   - `YYYYMMDD__qa_candidate_profiles_emails_preflight.json`
+  - `YYYYMMDD__qa_candidate_profiles_emails_candidate_map.json`
 
 Done when:
 - A dedicated candidate profile and email backfill script exists under `scripts/backfills/`.
-- The script supports deterministic ordering, resumable checkpoints, separate batched profile/email writes, safe reruns, and `--dry-run`.
+- The script supports deterministic ordering, resumable checkpoints, one-transaction-per-batch profile/email writes, safe reruns, and `--dry-run`.
 - The script processes only legacy `candidates` and legacy `candidate_emails`, with `candidates.email` used only as the defined fallback source.
 - `candidate_profiles_v2.id` reuse, LinkedIn identity matching, and profile ambiguity handling are explicit and implemented in the script contract.
 - Candidate-profile provenance is preserved in deduplicated `source_record_refs`.
+- A deterministic candidate-resolution mapping artifact is emitted and approved for downstream consumers.
 - Candidate-email uniqueness, cross-candidate email-conflict handling, and one-primary-email rules are explicit and implemented in the script contract.
 - A deterministic `--dry-run` on the first 100 legacy candidates in real script order has been completed and reviewed.
 - Controlled duplicate-validation fixtures have been executed in a safe development or sandbox environment for profile identity and email uniqueness behaviors.
@@ -704,7 +725,7 @@ Done when:
 
 ## [ ] Task 7b: Run 100-Row Pilot Candidate Profile And Email Backfill And Review Results
 - After Task 7a approval, run a committed 100-row pilot write using the same deterministic candidate order validated in Task 7a.
-- The 100 pilot-written `candidate_profiles_v2` rows and related `candidate_emails_v2` rows may remain in place and become part of the final canonical dataset.
+- The profile and email rows inserted or updated for this 100-candidate pilot cohort may remain in place and become part of the final canonical dataset.
 - Review the resulting rows directly in the database before permitting the full migration.
 - Confirm the pilot preserves the required profile fields:
   - stable canonical candidate id behavior
@@ -785,15 +806,15 @@ Done when:
 - This task must only link to already-canonical `companies_v2` rows produced by the approved company backfill.
 - This task depends on:
   - approved company backfill output from `Task 6c`
-  - approved candidate profile/email backfill output from `Task 7`
-- Task 8a implementation work may begin before later approvals, but the required Task 8a dry-run and validation are not complete until they run against a target DB state that already contains the approved outputs of `Task 6c` and `Task 7`.
+  - approved candidate profile/email backfill output and candidate-resolution mapping artifact from `Task 7c`
+- Task 8a implementation work may begin before later approvals, but the required Task 8a dry-run and validation are not complete until they run against a target DB state that already contains the approved outputs of `Task 6c` and `Task 7c`, including the approved Task 7c candidate-resolution mapping artifact.
 
 - Follow `SCHEMA_CONTRACT.md` exactly for `candidate_experiences_v2`. Columns written by this backfill are:
   - `candidate_id uuid not null`
     - must link to an existing `candidate_profiles_v2.id`
-    - must resolve to the approved canonical candidate row produced by `Task 7`
-    - when `Task 7` inserted a new canonical row by stable legacy id reuse, `candidate_id` will equal `public.candidates.id`
-    - when `Task 7` matched an existing canonical row by strong LinkedIn identity, this task must use that existing canonical candidate id rather than forcing a second profile row
+    - must resolve to the approved canonical candidate row produced by `Task 7c`
+    - when `Task 7c` inserted a new canonical row by stable legacy id reuse, `candidate_id` will equal `public.candidates.id`
+    - when `Task 7c` matched an existing canonical row by strong LinkedIn identity, this task must use that existing canonical candidate id rather than forcing a second profile row
   - `company_id uuid null`
     - may be null when no unambiguous canonical company match exists
     - when non-null, it must reference an existing `companies_v2.id`
@@ -836,7 +857,7 @@ Done when:
 - `id`, `created_at`, and `updated_at` are DB-managed and should not be mapped from legacy source data.
 
 - Map fields from the chosen source experience item to `candidate_experiences_v2` as follows:
-  - `public.candidates.id` -> resolved canonical `candidate_id` from the approved `Task 7` match outcome
+  - `public.candidates.id` -> resolved canonical `candidate_id` from the approved `Task 7c` match outcome
   - chosen source item array ordinal -> `experience_index`
   - source `title` -> `title`
     - trim outer whitespace
@@ -878,14 +899,14 @@ Done when:
 
 - Candidate linkage, company linkage, duplication, and rerun rules for this task are:
   - one chosen legacy experience item maps to at most one canonical `candidate_experiences_v2` row
-  - candidate linkage must follow the same approved candidate-resolution outcome established by `Task 7`
-  - resolve the destination `candidate_id` by deterministic lookup from the legacy `public.candidates.id` to the canonical `candidate_profiles_v2.id` already approved in `Task 7`:
-    - if `Task 7` inserted a canonical profile row by stable legacy id reuse, use that same id
-    - if `Task 7` matched the legacy candidate onto an existing canonical row by strong LinkedIn identity, use that matched canonical id
+  - candidate linkage must follow the same approved candidate-resolution outcome established by `Task 7c`
+  - resolve the destination `candidate_id` by deterministic lookup from the legacy `public.candidates.id` to the canonical `candidate_profiles_v2.id` already approved from Task 7c via the Task 7c candidate-resolution mapping artifact:
+    - if `Task 7c` inserted a canonical profile row by stable legacy id reuse, use that same id
+    - if `Task 7c` matched the legacy candidate onto an existing canonical row by strong LinkedIn identity, use that matched canonical id
     - do **not** perform a new fuzzy candidate match in this task
   - if no approved canonical candidate mapping can be resolved for the legacy candidate, the experience row must be `skip`:
     - do **not** create a candidate profile in this task
-    - do **not** silently remap the experience to another candidate outside the approved `Task 7` match outcome
+    - do **not** silently remap the experience to another candidate outside the approved `Task 7c` match outcome
     - count and sample these rows in QA output
   - company linkage must use the approved canonical company dataset in `companies_v2`
   - company resolution inputs are:
@@ -971,7 +992,7 @@ Done when:
   - avoid row-by-row chatty writes where possible
   - flatten source experience arrays in SQL or another deterministic batchable form before writing
   - prefer set-based or batched insert/update logic where possible
-  - use a deterministic candidate-mapping lookup keyed by legacy `public.candidates.id` -> canonical `candidate_profiles_v2.id`; if the approved mapping is derived from Task 7 provenance, materialize or batch that lookup instead of scanning JSONB row-by-row
+  - use the approved Task 7c candidate-resolution mapping artifact keyed by legacy `public.candidates.id` -> canonical `candidate_profiles_v2.id`; materialize or batch that lookup instead of scanning free-form JSONB row-by-row
   - use indexed company lookups on `companies_v2.linkedin_id`, `linkedin_username`, `linkedin_url_normalized`, and `normalized_name`
   - company resolution may be the most expensive path in this task and must be optimized carefully
   - batch strategy must be explicit in the script and QA report so pilot and full runs use the same behavior
@@ -1020,7 +1041,7 @@ Done when:
 
 ## [ ] Task 8b: Run 100-Row Pilot Candidate Experience Backfill And Review Results
 - After Task 8a approval, run a committed 100-row pilot write using the same deterministic flattened source order validated in Task 8a.
-- The pilot must run only after the approved outputs of `Task 6c` and `Task 7` are present in the target DB.
+- The pilot must run only after the approved outputs of `Task 6c` and `Task 7c` are present in the target DB, including the approved Task 7c candidate-resolution mapping artifact.
 - The 100 pilot-written `candidate_experiences_v2` rows may remain in place and become part of the final canonical dataset.
 - Review the resulting pilot rows directly in the database before permitting the full migration.
 - Confirm the pilot preserves the required stored fields and semantics:
@@ -1106,10 +1127,10 @@ Done when:
   - no `candidate_communications` rows should be read or converted in Task 9 because communication history is not yet contract-defined as candidate retrieval evidence for this backfill
 
 - Build a dedicated checkpoint-aware backfill entrypoint under `scripts/backfills/` for this migration, for example `scripts/backfills/09_candidate_source_documents_backfill.py`.
-- This task depends on the approved Task 7 candidate-resolution outcome.
-- `candidate_source_documents.candidate_id` must always point to the resolved canonical `candidate_profiles_v2.id` established by Task 7 for the underlying legacy candidate source row.
+- This task depends on the approved Task 7c candidate-resolution outcome and mapping artifact.
+- `candidate_source_documents.candidate_id` must always point to the resolved canonical `candidate_profiles_v2.id` established by Task 7c for the underlying legacy candidate source row.
 - Do **not** assume the raw legacy candidate UUID is always the canonical destination id.
-- If a legacy candidate source row cannot be resolved to an existing canonical candidate row from Task 7, skip it, report it, and do **not** create an orphan source-document row.
+- If a legacy candidate source row cannot be resolved to an existing canonical candidate row from Task 7c, skip it, report it, and do **not** create an orphan source-document row.
 - The script must be deterministic, idempotent, resumable, checkpoint-aware, batch-oriented, and safe to rerun.
 - The script must support `--dry-run` and must emit QA output under `reports/qa/`.
 - The script must use the Task 5 / retrieval helper contract already defined in the database:
@@ -1149,7 +1170,7 @@ Done when:
 
   - `linkedin_profile` from `candidates`
     - include one baseline logical LinkedIn-family document per candidate row
-    - `candidate_id` <- resolved canonical `candidate_profiles_v2.id` for the legacy `candidates` row under the approved Task 7 candidate-resolution outcome
+    - `candidate_id` <- resolved canonical `candidate_profiles_v2.id` for the legacy `candidates` row under the approved Task 7c candidate-resolution outcome
     - `source_type` <- `'linkedin_profile'`
     - `source_subtype` <- `null`
     - `title` <- `'LinkedIn profile'`
@@ -1188,7 +1209,7 @@ Done when:
 
   - `resume` from `candidates.resume_text`
     - include only when `resume_text` is nonblank after trimming
-    - `candidate_id` <- resolved canonical `candidate_profiles_v2.id` for the legacy `candidates` row under the approved Task 7 candidate-resolution outcome
+    - `candidate_id` <- resolved canonical `candidate_profiles_v2.id` for the legacy `candidates` row under the approved Task 7c candidate-resolution outcome
     - `source_type` <- `'resume'`
     - `source_subtype` <- `null`
     - `title` <- `'Resume text'`
@@ -1210,7 +1231,7 @@ Done when:
 
   - `manual_profile_note` from `candidates.notes`
     - include only when `notes` is nonblank after trimming
-    - `candidate_id` <- resolved canonical `candidate_profiles_v2.id` for the legacy `candidates` row under the approved Task 7 candidate-resolution outcome
+    - `candidate_id` <- resolved canonical `candidate_profiles_v2.id` for the legacy `candidates` row under the approved Task 7c candidate-resolution outcome
     - `source_type` <- `'manual_profile_note'`
     - `source_subtype` <- `null`
     - `title` <- `'Legacy profile note'`
@@ -1232,7 +1253,7 @@ Done when:
 
   - `recruiter_note_raw` from `recruiter_candidates.notes`
     - include one optional note document per `recruiter_candidates` row whose `notes` field is nonblank after trimming
-    - `candidate_id` <- resolved canonical `candidate_profiles_v2.id` for the underlying legacy candidate referenced by `recruiter_candidates.candidate_id` under the approved Task 7 candidate-resolution outcome
+    - `candidate_id` <- resolved canonical `candidate_profiles_v2.id` for the underlying legacy candidate referenced by `recruiter_candidates.candidate_id` under the approved Task 7c candidate-resolution outcome
     - `source_type` <- `'recruiter_note_raw'`
     - `source_subtype` <- `null`
     - `title` <- `'Recruiter note'`
