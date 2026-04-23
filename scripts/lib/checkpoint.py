@@ -162,7 +162,11 @@ class JsonCheckpoint:
         if state["status"] == "completed" and not force_rerun:
             return state, False
 
-        if state["status"] == "completed" and force_rerun:
+        if force_rerun and (
+            state["status"] != "pending"
+            or state["progress"]["cursor"] is not None
+            or int(state.get("run_attempt", 0)) > 0
+        ):
             previous_completed_at = state.get("completed_at")
             previous_attempts = int(state.get("run_attempt", 0))
             state = self.default_state()

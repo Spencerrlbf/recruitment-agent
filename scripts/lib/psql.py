@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+LOGGER = logging.getLogger(__name__)
 
 
 class PsqlError(RuntimeError):
@@ -126,6 +130,20 @@ class SupabaseLinkedClient:
     workdir: Path
     app_name: str
 
+    def _is_retryable_failure(self, completed: subprocess.CompletedProcess[str]) -> bool:
+        combined_output = f"{completed.stderr}\n{completed.stdout}"
+        retry_markers = (
+            "unexpected status 429",
+            "unexpected status 500",
+            "unexpected status 502",
+            "unexpected status 503",
+            "unexpected status 504",
+            "Too Many Requests",
+            "ThrottlerException",
+            "Failed to perform authorization check",
+        )
+        return any(marker in combined_output for marker in retry_markers)
+
     def _run_cli(self, sql: str) -> str:
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -150,19 +168,49 @@ class SupabaseLinkedClient:
                 "--file",
                 str(temp_path),
             ]
-            completed = subprocess.run(
-                command,
-                text=True,
-                capture_output=True,
-                env=os.environ.copy(),
-                check=False,
+            max_attempts = max(1, int(os.getenv("SUPABASE_LINKED_MAX_ATTEMPTS", "6")))
+            retry_base_seconds = max(
+                0.25, float(os.getenv("SUPABASE_LINKED_RETRY_BASE_SECONDS", "2"))
             )
+            retry_max_seconds = max(
+                retry_base_seconds,
+                float(os.getenv("SUPABASE_LINKED_RETRY_MAX_SECONDS", "30")),
+            )
+
+            completed: subprocess.CompletedProcess[str] | None = None
+            for attempt in range(1, max_attempts + 1):
+                completed = subprocess.run(
+                    command,
+                    text=True,
+                    capture_output=True,
+                    env=os.environ.copy(),
+                    check=False,
+                )
+                if completed.returncode == 0:
+                    return completed.stdout
+
+                if attempt >= max_attempts or not self._is_retryable_failure(completed):
+                    break
+
+                sleep_seconds = min(
+                    retry_max_seconds,
+                    retry_base_seconds * (2 ** (attempt - 1)),
+                )
+                LOGGER.warning(
+                    "supabase linked query throttled; retrying app_name=%s attempt=%s/%s sleep_seconds=%.1f",
+                    self.app_name,
+                    attempt,
+                    max_attempts,
+                    sleep_seconds,
+                )
+                time.sleep(sleep_seconds)
         finally:
             try:
                 temp_path.unlink()
             except FileNotFoundError:
                 pass
 
+        assert completed is not None
         if completed.returncode != 0:
             raise PsqlError(
                 "supabase db query --linked failed.\n"

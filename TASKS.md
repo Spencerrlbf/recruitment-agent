@@ -396,7 +396,7 @@ Done when:
 - Re-running the backfill does not create duplicate `companies_v2` rows or duplicate provenance entries.
 - Company resolution precedence is reproducible from the stored data and helper rules.
 
-## [ ] Task 7a: Implement Candidate Profile And Email Backfill Script And Preflight Validation
+## [x] Task 7a: Implement Candidate Profile And Email Backfill Script And Preflight Validation
 - Scope for this task is only:
   - legacy `candidates` -> `candidate_profiles_v2`
   - legacy `candidate_emails` -> `candidate_emails_v2`
@@ -723,7 +723,7 @@ Done when:
 - The Task 7a QA report captures dry-run findings, duplicate-validation outcomes, profile ambiguity outcomes, and email dedupe outcomes.
 - No committed pilot write or full backfill is performed until Task 7a is approved.
 
-## [ ] Task 7b: Run 100-Row Pilot Candidate Profile And Email Backfill And Review Results
+## [x] Task 7b: Run 100-Row Pilot Candidate Profile And Email Backfill And Review Results
 - After Task 7a approval, run a committed 100-row pilot write using the same deterministic candidate order validated in Task 7a.
 - The profile and email rows inserted or updated for this 100-candidate pilot cohort may remain in place and become part of the final canonical dataset.
 - Review the resulting rows directly in the database before permitting the full migration.
@@ -763,7 +763,7 @@ Done when:
 - The later full backfill is proven to continue safely from the pilot-written state without duplicating canonical candidate rows, canonical email rows, or profile provenance entries.
 - The full backfill is not run until the pilot-write review is approved.
 
-## [ ] Task 7c: Run Full Candidate Profile And Email Backfill
+## [x] Task 7c: Run Full Candidate Profile And Email Backfill
 - After Task 7b approval, run the full `candidates` + `candidate_emails` -> `candidate_profiles_v2` + `candidate_emails_v2` backfill using the approved script and checkpoint strategy.
 - Continue safely from the pilot-written state or another explicitly approved checkpoint state.
 - Preserve the same mapping, normalization, precedence, ambiguity handling, email dedupe, primary-email, and idempotency rules validated in Tasks 7a and 7b.
@@ -780,7 +780,7 @@ Done when:
 - Re-running the backfill does not create duplicate `candidate_profiles_v2` rows, duplicate `candidate_emails_v2` rows, or duplicate profile provenance entries.
 - The full run remains blocked until explicit approval of Task 7b.
 
-## [ ] Task 8a: Implement Candidate Experience Backfill Script And Preflight Validation
+## [x] Task 8a: Implement Candidate Experience Backfill Script And Preflight Validation
 - Scope for this task is **only** legacy candidate experience payloads -> `candidate_experiences_v2`.
 - The authoritative legacy source table for row creation in this task is `public.candidates`.
 - Source extraction order for each candidate is:
@@ -1057,7 +1057,7 @@ Done when:
 - Task 8a QA output shows that duplicate handling, company-link behavior, candidate-link behavior, and current-role/date normalization behavior are working as specified.
 - No pilot write or full backfill is performed until Task 8a is approved.
 
-## [ ] Task 8b: Run 100-Row Pilot Candidate Experience Backfill And Review Results
+## [x] Task 8b: Run 100-Row Pilot Candidate Experience Backfill And Review Results
 - After Task 8a approval, run a committed 100-row pilot write using the same deterministic flattened source order validated in Task 8a.
 - The pilot must run only after the approved outputs of `Task 6c` and `Task 7c` are present in the target DB, including the approved Task 7c candidate-resolution mapping artifact.
 - The first 100 flattened source rows form the pilot cohort; any `candidate_experiences_v2` rows actually written for that cohort may remain in place and become part of the final canonical dataset.
@@ -1097,7 +1097,7 @@ Done when:
 - The later full backfill is proven to continue safely from the pilot-written state without duplicating experience rows, provenance, or open ambiguity rows.
 - The full backfill is not run until the pilot review is approved.
 
-## [ ] Task 8c: Run Full Candidate Experience Backfill
+## [x] Task 8c: Run Full Candidate Experience Backfill
 - After Task 8b approval, run the full `public.candidates` experience-payload -> `candidate_experiences_v2` backfill using the approved script and checkpoint strategy.
 - Continue safely from the pilot-written state or another explicitly approved checkpoint state.
 - Preserve the same source selection, mapping, normalization, dedupe, candidate-link, company-link, ambiguity, provenance, and idempotency rules validated in Tasks 8a and 8b.
