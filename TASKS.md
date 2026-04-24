@@ -1121,28 +1121,29 @@ Done when:
 - A final QA report captures rows read, rows written, rows skipped, company-match outcomes, ambiguity outcomes, date/current-role distributions, and rerun/idempotency outcomes.
 
 ## [ ] Task 9a: Implement Candidate Source Document Backfill Script And Preflight Validation
-- Scope for this task is **only** legacy candidate source artifacts -> `candidate_source_documents`, plus `canonicalization_ambiguities` logging when a source-document decision is ambiguous.
+- Scope for this task is **only** the LinkedIn baseline profile document backfill into `candidate_source_documents`, plus `canonicalization_ambiguities` logging when a source-document decision is ambiguous.
 - Do **not** create `candidate_search_chunks`, `candidate_chunk_embeddings`, or `candidate_search_documents` in this task.
 - Do **not** modify `candidate_profiles_v2`, `candidate_emails_v2`, `candidate_experiences_v2`, or any legacy table in this task.
 - Exact legacy source tables in scope for this task series are:
   - `candidates`
-  - `recruiter_candidates`
 - Exact legacy source tables out of scope for this task series are:
+  - `recruiter_candidates`
   - `candidate_communications`
   - any transcript table, transcript file source, or future artifact source not documented in the current repo
 - Source families included in this task series are:
   - `linkedin_profile`
+- Source families explicitly out of scope for this task series are:
   - `resume`
   - `manual_profile_note`
   - `recruiter_note_raw`
-- Source families explicitly out of scope for this task series are:
   - `recruiter_note_summary`
   - `transcript_summary`
   - future candidate artifacts
 - Inference from the current schema/docs and legacy schema snapshot:
-  - `candidates.ai_summary` is **out of scope** for Task 9 because it is not authoritatively classified as an approved recruiter-note summary or a transcript summary
+  - `candidates.ai_summary` is **out of scope** for Task 9
   - no `transcript_summary` rows should be created in Task 9 because no authoritative legacy transcript source is currently documented
-  - no `candidate_communications` rows should be read or converted in Task 9 because communication history is not yet contract-defined as candidate retrieval evidence for this backfill
+  - no `candidate_communications` rows should be read or converted in Task 9 because communication history is not contract-defined as candidate retrieval evidence for this backfill
+  - no resume or note rows should be created in Task 9 because those families are intentionally excluded from the approved scope for this phase
 
 - Build a dedicated checkpoint-aware backfill entrypoint under `scripts/backfills/` for this migration, for example `scripts/backfills/09_candidate_source_documents_backfill.py`.
 - This task depends on the approved Task 7c candidate-resolution outcome and mapping artifact.
@@ -1159,16 +1160,16 @@ Done when:
 
 - Follow `SCHEMA_CONTRACT.md` exactly. `candidate_source_documents` columns touched by this backfill are:
   - `candidate_id uuid not null` — existing `candidate_profiles_v2.id`; required for every inserted row
-  - `source_type text not null` — one of `linkedin_profile`, `resume`, `manual_profile_note`, `recruiter_note_raw`
+  - `source_type text not null` — set to `'linkedin_profile'` for every Task 9 backfilled row
   - `source_subtype text null` — set to `null` for all Task 9 backfilled rows; source-table provenance lives in `external_source_ref` and `metadata_json`
-  - `title text null` — deterministic display/debug label by source family
-  - `source_url text null` — populated only for `linkedin_profile`; otherwise `null`
+  - `title text null` — deterministic display/debug label
+  - `source_url text null` — populated only from normalized LinkedIn URL data
   - `external_source_ref text null` — deterministic stable upstream reference used for rerun-safe identity/provenance
   - `raw_payload jsonb null` — original structured source payload when available
-  - `raw_text text null` — original text artifact or deterministic assembled legacy text
+  - `raw_text text null` — deterministic assembled legacy LinkedIn/profile text
   - `normalized_text text null` — cleaned deterministic text used for source-document comparison and later chunking
   - `metadata_json jsonb null` — deterministic provenance and document-identity metadata
-  - `trust_level text not null` — `baseline`, `high`, or `supplemental` depending on source family
+  - `trust_level text not null` — set to `'baseline'`
   - `document_version integer not null` — initial version `1`; increment only on `supersede`
   - `is_active boolean not null` — `true` for current active version; older superseded versions become `false`
   - `effective_at timestamptz null` — best available source timestamp when the document version became current
@@ -1196,7 +1197,7 @@ Done when:
 - Map legacy source fields into `candidate_source_documents` exactly as follows unless `SCHEMA_CONTRACT.md` is updated first:
 
   - `linkedin_profile` from `candidates`
-    - include one baseline logical LinkedIn-family document per candidate row
+    - include exactly one baseline logical LinkedIn-family document per eligible candidate row
     - `candidate_id` <- resolved canonical `candidate_profiles_v2.id` for the legacy `candidates` row under the approved Task 7c candidate-resolution outcome
     - `source_type` <- `'linkedin_profile'`
     - `source_subtype` <- `null`
@@ -1220,7 +1221,7 @@ Done when:
     - when any assembled input field is array- or JSON-shaped, serialize it deterministically: preserve source order for arrays/lists, use stable key order for object fields, and join repeated items with a fixed newline-separated format used identically in dry-run, pilot, and full runs
     - `normalized_text` <- cleaned deterministic text version of `raw_text`; no summarization or paraphrasing
     - `metadata_json` <- deterministic provenance including:
-      - deterministic `document_identity_key`, e.g. `legacy:candidates:<candidate_id>:linkedin_profile`, for provenance consistency even though LinkedIn decision logic still treats the family as one logical document per candidate
+      - deterministic `document_identity_key`, e.g. `legacy:candidates:<candidate_id>:linkedin_profile`
       - `source_table = 'candidates'`
       - `legacy_candidate_id`
       - `source_fields_used`
@@ -1234,76 +1235,10 @@ Done when:
     - `trust_level` <- `'baseline'`
     - `effective_at` <- `linkedin_enrichment_date`, else `updated_at`, else `created_at`, else `null`
 
-  - `resume` from `candidates.resume_text`
-    - include only when `resume_text` is nonblank after trimming
-    - `candidate_id` <- resolved canonical `candidate_profiles_v2.id` for the legacy `candidates` row under the approved Task 7c candidate-resolution outcome
-    - `source_type` <- `'resume'`
-    - `source_subtype` <- `null`
-    - `title` <- `'Resume text'`
-    - `source_url` <- `null`
-    - `external_source_ref` <- `legacy:candidates:<candidate_id>:resume_text`
-    - `raw_payload` <- `null`
-    - `raw_text` <- `candidates.resume_text`
-    - `normalized_text` <- cleaned deterministic text version of `resume_text`
-    - `metadata_json` <- deterministic provenance including:
-      - `document_identity_key = 'legacy:candidates:<candidate_id>:resume_text'`
-      - `source_table = 'candidates'`
-      - `source_column = 'resume_text'`
-      - `legacy_candidate_id`
-      - `legacy_created_at`
-      - `legacy_updated_at`
-      - optional deterministic `content_sha256`
-    - `trust_level` <- `'high'`
-    - `effective_at` <- `updated_at`, else `created_at`, else `null`
-
-  - `manual_profile_note` from `candidates.notes`
-    - include only when `notes` is nonblank after trimming
-    - `candidate_id` <- resolved canonical `candidate_profiles_v2.id` for the legacy `candidates` row under the approved Task 7c candidate-resolution outcome
-    - `source_type` <- `'manual_profile_note'`
-    - `source_subtype` <- `null`
-    - `title` <- `'Legacy profile note'`
-    - `source_url` <- `null`
-    - `external_source_ref` <- `legacy:candidates:<candidate_id>:notes`
-    - `raw_payload` <- `null`
-    - `raw_text` <- `candidates.notes`
-    - `normalized_text` <- cleaned deterministic text version of `notes`
-    - `metadata_json` <- deterministic provenance including:
-      - `document_identity_key = 'legacy:candidates:<candidate_id>:notes'`
-      - `source_table = 'candidates'`
-      - `source_column = 'notes'`
-      - `legacy_candidate_id`
-      - `legacy_created_at`
-      - `legacy_updated_at`
-      - optional deterministic `content_sha256`
-    - `trust_level` <- `'supplemental'`
-    - `effective_at` <- `updated_at`, else `created_at`, else `null`
-
-  - `recruiter_note_raw` from `recruiter_candidates.notes`
-    - include one optional note document per `recruiter_candidates` row whose `notes` field is nonblank after trimming
-    - `candidate_id` <- resolved canonical `candidate_profiles_v2.id` for the underlying legacy candidate referenced by `recruiter_candidates.candidate_id` under the approved Task 7c candidate-resolution outcome
-    - `source_type` <- `'recruiter_note_raw'`
-    - `source_subtype` <- `null`
-    - `title` <- `'Recruiter note'`
-    - `source_url` <- `null`
-    - `external_source_ref` <- `legacy:recruiter_candidates:<row_id>:notes`
-    - `raw_payload` <- `null`
-    - `raw_text` <- `recruiter_candidates.notes`
-    - `normalized_text` <- cleaned deterministic text version of `notes`
-    - `metadata_json` <- deterministic provenance including:
-      - `document_identity_key = 'legacy:recruiter_candidates:<row_id>:notes'`
-      - `source_table = 'recruiter_candidates'`
-      - `legacy_row_id`
-      - `legacy_candidate_id`
-      - `recruiter_id`
-      - `assigned_at`
-      - `status`
-      - `last_contact_date`
-      - `last_contact_type`
-      - optional deterministic `content_sha256`
-    - `trust_level` <- `'supplemental'`
-    - `effective_at` <- `last_contact_date`, else `assigned_at`, else `null`
-
 - Explicit Task 9 field exclusions:
+  - do **not** map `candidates.resume_text`
+  - do **not** map `candidates.notes`
+  - do **not** map `recruiter_candidates.notes`
   - do **not** map `candidates.ai_summary`
   - do **not** map any `candidate_communications` field
   - do **not** create `recruiter_note_summary` rows
@@ -1318,21 +1253,6 @@ Done when:
     - same normalized content -> `no_op`
     - changed normalized content -> `supersede`
     - multiple active LinkedIn rows for the same candidate -> `ambiguous`
-  - `resume`
-    - stable logical identity is the deterministic legacy resume ref stored in `metadata_json.document_identity_key` / `external_source_ref`
-    - same identity + same normalized content -> `no_op`
-    - same identity + changed normalized content -> `supersede`
-    - different identity -> `parallel`
-  - `manual_profile_note`
-    - stable logical identity is `legacy:candidates:<candidate_id>:notes`
-    - same identity + same normalized content -> `no_op`
-    - same identity + changed normalized content -> `supersede`
-    - different identity -> `parallel`
-  - `recruiter_note_raw`
-    - stable logical identity is `legacy:recruiter_candidates:<row_id>:notes`
-    - same identity + same normalized content -> `no_op`
-    - same identity + changed normalized content -> `supersede`
-    - different recruiter-note row refs remain `parallel` even if the text is identical
   - content-hash comparison rules:
     - use `build_candidate_source_document_content_hash(...)`
     - normalized content comparison is case-insensitive and whitespace-normalized through the helper
@@ -1347,7 +1267,7 @@ Done when:
     - old active row becomes `is_active = false`
     - old active row gets `superseded_at`
     - new row inserts with incremented `document_version`
-    - only one active row remains current within a logical document family
+    - only one active row remains current within the LinkedIn logical document family
   - `ambiguous` behavior:
     - do **not** auto-merge
     - do **not** insert a new source document
@@ -1380,9 +1300,6 @@ Done when:
     - legacy `candidates` ordered by `id`
     - for each candidate in that order:
       - `linkedin_profile`
-      - optional `resume`
-      - optional `manual_profile_note`
-      - related `recruiter_candidates.notes` rows ordered by `recruiter_candidates.id`
   - the script must batch on candidate rows, not on output document rows
   - the checkpoint must store enough state to resume safely by candidate cursor and batch counters
   - checkpoints must advance only after durable success for the full candidate batch
@@ -1392,39 +1309,25 @@ Done when:
   - use indexed lookups on:
     - `candidate_profiles_v2(id)`
     - `candidate_source_documents(candidate_id, source_type, is_active)`
-  - likely expensive paths are large `resume_text` and note normalization; normalize once per artifact and reuse the result for decisioning, insert payloads, and QA output
   - deep parsing of additional nested text from `linkedin_data` is out of scope for Task 9; if 9a shows it is required for baseline coverage, update docs before implementation
 
 - Required preflight validation for Task 9a:
   - run a deterministic `--dry-run` on the first **100 legacy `candidates` rows** in real script order
-  - include all in-scope `recruiter_candidates.notes` rows attached to those same 100 candidates
   - perform duplicate-validation fixtures in a safe development or sandbox environment instead of mutating real legacy data
-  - explicitly validate `no_op`, `parallel`, `supersede`, and `ambiguous` outcomes, including at minimum:
+  - explicitly validate `no_op`, `supersede`, and `ambiguous` outcomes, including at minimum:
     - LinkedIn same-content `no_op`
     - LinkedIn changed-content `supersede`
     - LinkedIn duplicate-active-row `ambiguous`
-    - resume same stable key + same content `no_op`
-    - resume same stable key + changed content `supersede`
-    - manual/recruiter note same stable ref + same content `no_op`
-    - manual/recruiter note same stable ref + changed content `supersede`
-    - different stable note refs remaining `parallel`
-    - duplicate active stable-identity matches resolving to `ambiguous`
   - no committed writes are allowed in the dry run
   - emit a QA report for Task 9a under `reports/qa/` with counts for:
     - legacy candidate rows read
-    - related recruiter-note rows read
     - `linkedin_profile` docs that would be inserted
-    - `resume` docs that would be inserted
-    - `manual_profile_note` docs that would be inserted
-    - `recruiter_note_raw` docs that would be inserted
     - `no_op` outcomes
-    - `parallel` outcomes
     - `supersede` outcomes
     - ambiguous outcomes
-    - blank-source skips by family
     - orphan-source skips where `candidate_profiles_v2` is missing
     - candidates that would end without the required active `linkedin_profile` document; this count must resolve to zero before Task 9a approval
-    - sample normalized-text outputs by family
+    - sample normalized-text outputs
     - duplicate-validation fixture outcomes by decision type
 - QA artifacts should be clearly named under `reports/qa/`, for example:
   - `YYYYMMDD__qa_candidate_source_documents_preflight.md`
@@ -1436,15 +1339,14 @@ Done when:
 - The script reads only the approved legacy source tables for this task series.
 - The field mapping, normalization, identity, ambiguity, and versioning rules are explicit and match `SCHEMA_CONTRACT.md` and the existing helper behavior.
 - A deterministic dry run of the first 100 legacy candidate rows in real script order has been completed and reviewed.
-- Duplicate-validation fixtures have confirmed `no_op`, `parallel`, `supersede`, and `ambiguous` handling without silently creating duplicate source documents.
-- The Task 9a QA report captures dry-run findings, source-family counts, blank/orphan skips, candidate baseline coverage, and duplicate-validation outcomes.
+- Duplicate-validation fixtures have confirmed `no_op`, `supersede`, and `ambiguous` handling without silently creating duplicate source documents.
+- The Task 9a QA report captures dry-run findings, source-family counts, orphan skips, candidate baseline coverage, and duplicate-validation outcomes.
 - The dry run confirms that every candidate in scope can be resolved to a canonical candidate row and can produce the required active `linkedin_profile` document under the approved Task 9 rules.
 - No pilot write or full backfill is performed until Task 9a is approved.
 
 ## [ ] Task 9b: Run 100-Row Pilot Candidate Source Document Backfill And Review Results
 - After Task 9a approval, run a controlled pilot write using the first **100 legacy `candidates` rows** in the same deterministic script order validated in Task 9a.
-- Include all in-scope `recruiter_candidates.notes` rows attached to those same 100 candidates.
-- The pilot unit is 100 legacy candidate rows; the pilot may create more than 100 `candidate_source_documents` rows.
+- The pilot unit is 100 legacy candidate rows and should create at most one `linkedin_profile` document per eligible candidate.
 - Pilot-written source-document rows may remain in place and become part of the final retrieval dataset.
 - Review the resulting `candidate_source_documents` rows directly in the database before permitting the full migration.
 - Review the resulting `canonicalization_ambiguities` rows directly in the database before permitting the full migration.
@@ -1463,12 +1365,12 @@ Done when:
   - `effective_at`
   - `superseded_at`
   - `ingested_at`
-- Confirm the pilot writes only the approved source families:
+- Confirm the pilot writes only the approved source family:
   - `linkedin_profile`
-  - `resume`
-  - `manual_profile_note`
-  - `recruiter_note_raw`
 - Confirm the pilot writes **no** rows from excluded inputs:
+  - `candidates.resume_text`
+  - `candidates.notes`
+  - `recruiter_candidates.notes`
   - `candidates.ai_summary`
   - `candidate_communications`
   - `recruiter_note_summary`
@@ -1477,16 +1379,13 @@ Done when:
 - Confirm every pilot candidate in scope has exactly one active `linkedin_profile` document after the pilot.
 - Confirm trust levels are correct:
   - `linkedin_profile` = `baseline`
-  - `resume` = `high`
-  - note families = `supplemental`
 - Confirm active/inactive document version behavior is correct in the real DB:
   - `no_op` creates no duplicate row
   - `supersede` deactivates the old row and inserts the next version
-  - `parallel` keeps distinct logical artifacts separate
   - `ambiguous` writes only to `canonicalization_ambiguities`
 - Confirm the later full migration can safely continue from the pilot-written state without creating duplicate source documents or duplicate open ambiguity entries.
 - Confirm rerunning the pilot from the same starting point is idempotent.
-- Emit a pilot QA report under `reports/qa/` with actual inserted, superseded, no-op, parallel, ambiguous, skipped, and coverage outcomes.
+- Emit a pilot QA report under `reports/qa/` with actual inserted, superseded, no-op, ambiguous, skipped, and coverage outcomes.
 
 Done when:
 - A controlled pilot write for the first 100 legacy candidate rows has been completed after Task 9a approval.
@@ -1502,6 +1401,9 @@ Done when:
 - Preserve the same mapping, normalization, inclusion/exclusion, dedupe, ambiguity, versioning, and provenance rules validated in Tasks 9a and 9b.
 - Do **not** widen scope during the full run:
   - do **not** add `candidate_communications`
+  - do **not** add `candidates.resume_text`
+  - do **not** add `candidates.notes`
+  - do **not** add `recruiter_candidates.notes`
   - do **not** add `candidates.ai_summary`
   - do **not** add `recruiter_note_summary`
   - do **not** add `transcript_summary`
@@ -1510,11 +1412,10 @@ Done when:
 
 Done when:
 - The full backfill has been completed only after Task 9a and Task 9b approval.
-- `candidate_source_documents` contains the approved Task 9 source families with the required mapped fields populated.
+- `candidate_source_documents` contains the approved Task 9 LinkedIn baseline documents with the required mapped fields populated.
 - Every candidate in scope has one active `linkedin_profile` document after the full run.
-- Resume and note artifacts remain separate source documents and are not merged into LinkedIn rows.
 - Ambiguous cases are logged and skipped rather than silently merged.
-- A final QA report captures rows read, rows written, decision counts by `no_op` / `parallel` / `supersede` / `ambiguous`, per-family counts, blank/orphan skips, baseline-coverage gaps, and final migration outcomes.
+- A final QA report captures rows read, rows written, decision counts by `no_op` / `supersede` / `ambiguous`, orphan skips, baseline-coverage gaps, and final migration outcomes.
 - Re-running the backfill does not create duplicate source documents or duplicate open ambiguity entries.
 - The full run preserves the active/inactive version semantics validated in the pilot.
 
