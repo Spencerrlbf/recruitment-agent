@@ -1120,7 +1120,7 @@ Done when:
 - The resulting canonical work-history rows are sufficient for later current-role derivation so current-role state comes from `candidate_experiences_v2`, not legacy profile text fields.
 - A final QA report captures rows read, rows written, rows skipped, company-match outcomes, ambiguity outcomes, date/current-role distributions, and rerun/idempotency outcomes.
 
-## [ ] Task 9a: Implement Candidate Source Document Backfill Script And Preflight Validation
+## [x] Task 9a: Implement Candidate Source Document Backfill Script And Preflight Validation
 - Scope for this task is **only** the LinkedIn baseline profile document backfill into `candidate_source_documents`, plus `canonicalization_ambiguities` logging when a source-document decision is ambiguous.
 - Do **not** create `candidate_search_chunks`, `candidate_chunk_embeddings`, or `candidate_search_documents` in this task.
 - Do **not** modify `candidate_profiles_v2`, `candidate_emails_v2`, `candidate_experiences_v2`, or any legacy table in this task.
@@ -1344,7 +1344,7 @@ Done when:
 - The dry run confirms that every candidate in scope can be resolved to a canonical candidate row and can produce the required active `linkedin_profile` document under the approved Task 9 rules.
 - No pilot write or full backfill is performed until Task 9a is approved.
 
-## [ ] Task 9b: Run 100-Row Pilot Candidate Source Document Backfill And Review Results
+## [x] Task 9b: Run 100-Row Pilot Candidate Source Document Backfill And Review Results
 - After Task 9a approval, run a controlled pilot write using the first **100 legacy `candidates` rows** in the same deterministic script order validated in Task 9a.
 - The pilot unit is 100 legacy candidate rows and should create at most one `linkedin_profile` document per eligible candidate.
 - Pilot-written source-document rows may remain in place and become part of the final retrieval dataset.
@@ -1395,7 +1395,7 @@ Done when:
 - The later full backfill is proven to continue safely from the pilot-written state without duplicating source documents or open ambiguity entries.
 - The full backfill is not run until the pilot-write review is approved.
 
-## [ ] Task 9c: Run Full Candidate Source Document Backfill
+## [x] Task 9c: Run Full Candidate Source Document Backfill
 - After Task 9b approval, run the full candidate source-document backfill using the approved script and checkpoint strategy.
 - Continue safely from the pilot-written state or another explicitly approved checkpoint state.
 - Preserve the same mapping, normalization, inclusion/exclusion, dedupe, ambiguity, versioning, and provenance rules validated in Tasks 9a and 9b.
